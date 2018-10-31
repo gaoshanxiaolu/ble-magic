@@ -1,0 +1,2216 @@
+   1                 		.file	"byte_queue.c"
+   2                 		.variant xap2+
+   3                 	
+   4                 		.small
+   5                 	
+   6                 		.section	.debug_abbrev,"",@progbits
+   7                 	.Ldebug_abbrev0:
+   8                 		.section	.debug_info,"",@progbits
+   9                 	.Ldebug_info0:
+  10                 		.section	.debug_line,"",@progbits
+  11                 	.Ldebug_line0:
+  12 0000 00 00 00 00 		.text
+  12      00 02 00 00 
+  12      00 00 01 01 
+  12      FB 0E 0D 00 
+  12      01 01 01 01 
+  13                 	.Ltext0:
+  14                 		.section	.bss.g_head,"aw",@nobits
+  15                 		.type	g_head, @object
+  16                 		.size	g_head, 1
+  17                 	g_head:
+  18 0000 00 00       		.space	1
+  19                 		.section	.bss.g_peek,"aw",@nobits
+  20                 		.type	g_peek, @object
+  21                 		.size	g_peek, 1
+  22                 	g_peek:
+  23 0000 00 00       		.space	1
+  24                 		.section	.bss.g_tail,"aw",@nobits
+  25                 		.type	g_tail, @object
+  26                 		.size	g_tail, 1
+  27                 	g_tail:
+  28 0000 00 00       		.space	1
+  29                 		.section	.text.copyIntoBuffer,"ax",@progbits
+  30                 		.type	copyIntoBuffer, @function
+  31                 	copyIntoBuffer:
+  32                 	.LFB2:
+  33                 		.file 1 "byte_queue.c"
+   0:byte_queue.c  **** /******************************************************************************
+   1:byte_queue.c  ****  *  Copyright Cambridge Silicon Radio Limited 2012-2015
+   2:byte_queue.c  ****  *  Part of CSR uEnergy SDK 2.4.5
+   3:byte_queue.c  ****  *  Application version 2.4.5.0
+   4:byte_queue.c  ****  *
+   5:byte_queue.c  ****  *  FILE
+   6:byte_queue.c  ****  *      byte_queue.c
+   7:byte_queue.c  ****  *
+   8:byte_queue.c  ****  *  DESCRIPTION
+   9:byte_queue.c  ****  *      Circular buffer implementation.
+  10:byte_queue.c  ****  *
+  11:byte_queue.c  ****  ******************************************************************************/
+  12:byte_queue.c  **** 
+  13:byte_queue.c  **** /*============================================================================*
+  14:byte_queue.c  ****  *  SDK Header Files
+  15:byte_queue.c  ****  *============================================================================*/
+  16:byte_queue.c  ****  
+  17:byte_queue.c  **** #include <mem.h>            /* Memory library */
+  18:byte_queue.c  **** 
+  19:byte_queue.c  **** /*============================================================================*
+  20:byte_queue.c  ****  *  Local Header Files
+  21:byte_queue.c  ****  *============================================================================*/
+  22:byte_queue.c  **** 
+  23:byte_queue.c  **** #include "byte_queue.h"     /* Interface to this source file */
+  24:byte_queue.c  **** 
+  25:byte_queue.c  **** /*============================================================================*
+  26:byte_queue.c  ****  *  Private Definitions
+  27:byte_queue.c  ****  *============================================================================*/
+  28:byte_queue.c  **** 
+  29:byte_queue.c  **** /* Intended buffer size in number of bytes */
+  30:byte_queue.c  **** #define BUFFER_SIZE 1024
+  31:byte_queue.c  **** 
+  32:byte_queue.c  **** /* Largest amount of data that can be stored in the buffer */
+  33:byte_queue.c  **** #define BUFFER_LEN (BUFFER_SIZE - 1)
+  34:byte_queue.c  **** 
+  35:byte_queue.c  **** /* Length of data currently held in queue */
+  36:byte_queue.c  **** #define QUEUE_LENGTH \
+  37:byte_queue.c  ****        ((g_tail >= g_head) ? g_tail - g_head : BUFFER_SIZE - g_head + g_tail)
+  38:byte_queue.c  ****            
+  39:byte_queue.c  **** /* Amount of free space left in queue (= BUFFER_LEN - QUEUE_LENGTH) */
+  40:byte_queue.c  **** #define QUEUE_FREE \
+  41:byte_queue.c  ****        ((g_tail >= g_head) ? BUFFER_LEN - g_tail + g_head : g_head - g_tail - 1)
+  42:byte_queue.c  **** 
+  43:byte_queue.c  **** /*============================================================================*
+  44:byte_queue.c  ****  *  Private Data
+  45:byte_queue.c  ****  *============================================================================*/
+  46:byte_queue.c  **** 
+  47:byte_queue.c  **** /* Circular buffer */
+  48:byte_queue.c  **** static uint8 g_queue[BUFFER_SIZE];
+  49:byte_queue.c  **** 
+  50:byte_queue.c  **** /* Pointer to head of queue (next byte to be read out) */
+  51:byte_queue.c  **** static uint16 g_head = 0;
+  52:byte_queue.c  **** 
+  53:byte_queue.c  **** /* Pointer to head of queue after committing most recent peek */
+  54:byte_queue.c  **** static uint16 g_peek = 0;
+  55:byte_queue.c  **** 
+  56:byte_queue.c  **** /* Pointer to tail of queue (next byte to be inserted) */
+  57:byte_queue.c  **** static uint16 g_tail = 0;
+  58:byte_queue.c  **** 
+  59:byte_queue.c  **** /*============================================================================*
+  60:byte_queue.c  ****  *  Private Function Prototypes
+  61:byte_queue.c  ****  *============================================================================*/
+  62:byte_queue.c  **** 
+  63:byte_queue.c  **** /* Append the supplied data to the queue */
+  64:byte_queue.c  **** static void copyIntoBuffer(const uint8 *p_data, uint16 len);
+  65:byte_queue.c  **** 
+  66:byte_queue.c  **** /* Read up to the requested number of bytes out of the queue */
+  67:byte_queue.c  **** static uint16 peekBuffer(uint8 *p_data, uint16 len);
+  68:byte_queue.c  **** 
+  69:byte_queue.c  **** /*============================================================================*
+  70:byte_queue.c  ****  *  Private Function Implementations
+  71:byte_queue.c  ****  *============================================================================*/
+  72:byte_queue.c  ****  
+  73:byte_queue.c  **** /*----------------------------------------------------------------------------*
+  74:byte_queue.c  ****  *  NAME
+  75:byte_queue.c  ****  *      copyIntoBuffer
+  76:byte_queue.c  ****  *
+  77:byte_queue.c  ****  *  DESCRIPTION
+  78:byte_queue.c  ****  *      Copy a given number of bytes in to the buffer. Assumes there is enough
+  79:byte_queue.c  ****  *      space available in the buffer. If not, the existing data will be
+  80:byte_queue.c  ****  *      overwritten to accommodate the new data.
+  81:byte_queue.c  ****  *
+  82:byte_queue.c  ****  *      At the end of the function g_head points to the oldest queue entry and
+  83:byte_queue.c  ****  *      g_tail the next insertion point.
+  84:byte_queue.c  ****  *
+  85:byte_queue.c  ****  * PARAMETERS
+  86:byte_queue.c  ****  *      p_data [in]     Pointer to the data to be copied
+  87:byte_queue.c  ****  *      len    [in]     Number of bytes of data to be copied
+  88:byte_queue.c  ****  *
+  89:byte_queue.c  ****  * RETURNS
+  90:byte_queue.c  ****  *      Nothing
+  91:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+  92:byte_queue.c  **** static void copyIntoBuffer(const uint8 *p_data, uint16 len)
+  93:byte_queue.c  **** {
+  34                 	0:
+  35 0000 07 0B       		st	AL,@(0x0002,Y)
+  36                 		st	AH,@(0x0003,Y)
+  37 0001 02 27       		.loc 1 96 0
+  38 0002 03 23       		tst	@(0x0003,Y)
+  94:byte_queue.c  ****     /* Sanity check */
+  95:byte_queue.c  ****     if ((len == 0) || (p_data == NULL))
+  39                 	.L13
+  40 0003 03 9B       		tst	@(0x0002,Y)
+  41 0004 00 00 00 00 		beq	.L13
+  41      00 F4 
+  42 0007 02 9B       	.L3:
+  43 0008 00 00 00 00 		.loc 1 100 0
+  43      00 F4 
+  44                 		ld	AL,@(0x0003,Y)
+  96:byte_queue.c  ****         return;
+  97:byte_queue.c  ****     
+  98:byte_queue.c  ****     /* No point copying more data into the queue than the queue can hold */
+  99:byte_queue.c  ****     if (len > BUFFER_LEN)
+  45                 	L,#0x03ff
+  46 000b 03 17       		bcz	.L5
+  47 000c 04 00 FF 84 		.loc 1 103 0
+  48 000e 00 00 00 00 		ld	AL,@(0x0003,Y)
+  48      00 2C 
+ 100:byte_queue.c  ****     {
+ 101:byte_queue.c  ****         /* Advance input pointer to the last BUFFER_LEN bytes */
+ 102:byte_queue.c  ****         p_data += len - BUFFER_LEN;
+  49                 	AH,@$XAP_AL
+  50 0011 03 17       		add	AH,#0xfc01
+  51 0012 00 00 00 11 		ld	AL,@(0x0002,Y)
+  52 0014 FC 00 01 30 		ld	X,@$XAP_AL
+  53 0016 02 17       		add	X,@$XAP_AH
+  54 0017 00 00 00 19 		st	X,@(0x0002,Y)
+  55 0019 00 00 00 39 		.loc 1 106 0
+  56 001b 02 2B       		ld	AL,#0x03ff
+ 103:byte_queue.c  ****         
+ 104:byte_queue.c  ****         /* Adjust len */
+ 105:byte_queue.c  ****         len = BUFFER_LEN;
+  57                 	(0x0003,Y)
+  58 001c 04 00 FF 14 	.L5:
+  59 001e 03 27       		.loc 1 110 0
+  60                 		ld	AH,@g_tail
+ 106:byte_queue.c  ****     }
+ 107:byte_queue.c  ****     
+ 108:byte_queue.c  ****     /* Check whether the queue will overflow */
+ 109:byte_queue.c  ****     if (len > QUEUE_FREE)
+  61                 	AL,@g_head
+  62 001f 00 00 00 11 		cmp	AH,@$XAP_AL
+  63 0021 00 00 00 15 		bcs	.L6
+  64 0023 00 00 00 81 		ld	AL,@g_head
+  65 0025 00 00 00 00 		ld	AH,@g_tail
+  65      00 FC 
+  66 0028 00 00 00 15 		sub	AL,@$XAP_AH
+  67 002a 00 00 00 11 		ld	X,@$XAP_AL
+  68 002c 00 00 00 55 		add	X,#0x03ff
+  69 002e 00 00 00 19 		st	X,@(0x0005,Y)
+  70 0030 04 00 FF 38 		bra	.L7
+  71 0032 05 2B       	.L6:
+  72 0033 00 00 00 00 		ld	AL,@g_head
+  72      00 E0 
+  73                 		ld	AH,@g_tail
+  74 0036 00 00 00 15 		sub	AL,@$XAP_AH
+  75 0038 00 00 00 11 		ld	X,@$XAP_AL
+  76 003a 00 00 00 55 		add	X,#0xffff
+  77 003c 00 00 00 19 		st	X,@(0x0005,Y)
+  78 003e FF 38       	.L7:
+  79 003f 05 2B       		ld	AL,@(0x0005,Y)
+  80                 		cmp	AL,@(0x0003,Y)
+  81 0040 05 17       		bcc	.L8
+  82 0041 03 87       		.loc 1 113 0
+  83 0042 00 00 00 00 		ld	AH,@g_tail
+  83      00 F8 
+ 110:byte_queue.c  ****     {
+ 111:byte_queue.c  ****         /* Advance g_head to point to the oldest item, after the overflow */
+ 112:byte_queue.c  ****         g_head += len - QUEUE_FREE;
+  84                 	@$XAP_AL
+  85 0045 00 00 00 11 		bcs	.L9
+  86 0047 00 00 00 15 		ld	AL,@g_head
+  87 0049 00 00 00 81 		ld	AH,@g_tail
+  88 004b 00 00 00 00 		sub	AL,@$XAP_AH
+  88      00 FC 
+  89 004e 00 00 00 15 		ld	X,@$XAP_AL
+  90 0050 00 00 00 11 		add	X,#0x03ff
+  91 0052 00 00 00 55 		st	X,@(0x0004,Y)
+  92 0054 00 00 00 19 		bra	.L10
+  93 0056 04 00 FF 38 	.L9:
+  94 0058 04 2B       		ld	AL,@g_head
+  95 0059 00 00 00 00 		ld	AH,@g_tail
+  95      00 E0 
+  96                 		sub	AL,@$XAP_AH
+  97 005c 00 00 00 15 		ld	X,@$XAP_AL
+  98 005e 00 00 00 11 		add	X,#0xffff
+  99 0060 00 00 00 55 		st	X,@(0x0004,Y)
+ 100 0062 00 00 00 19 	.L10:
+ 101 0064 FF 38       		ld	AH,@(0x0003,Y)
+ 102 0065 04 2B       		sub	AH,@(0x0004,Y)
+ 103                 		ld	AL,@g_head
+ 104 0066 03 13       		add	AL,@$XAP_AH
+ 105 0067 04 53       		st	AL,@g_head
+ 106 0068 00 00 00 15 		.loc 1 116 0
+ 107 006a 00 00 00 35 		ld	AL,@g_head
+ 108 006c 00 00 00 25 		cmp	AL,#0x03ff
+ 113:byte_queue.c  ****         
+ 114:byte_queue.c  ****         /* If this goes past the end of the buffer, wrap around */
+ 115:byte_queue.c  ****         if (g_head >= BUFFER_SIZE)
+ 109                 	ld	AL,@g_head
+ 110 006e 00 00 00 15 		add	AL,#0xfc00
+ 111 0070 04 00 FF 84 		st	AL,@g_head
+ 112 0072 00 00 00 00 	.L11:
+ 112      00 2C 
+ 116:byte_queue.c  ****             g_head -= BUFFER_SIZE;
+ 113                 	c 1 120 0
+ 114 0075 00 00 00 15 		ld	AL,@g_head
+ 115 0077 FC 00 00 34 		st	AL,@g_peek
+ 116 0079 00 00 00 25 	.L8:
+ 117                 		.loc 1 124 0
+ 117:byte_queue.c  ****         
+ 118:byte_queue.c  ****         /* Update g_peek similarly */
+ 119:byte_queue.c  ****         g_peek = g_head;
+ 118                 	L,@g_tail
+ 119 007b 00 00 00 15 		add	AL,@(0x0003,Y)
+ 120 007d 00 00 00 25 		cmp	AL,#0x03ff
+ 121                 		bcz	.L12
+ 120:byte_queue.c  ****     }
+ 121:byte_queue.c  ****     
+ 122:byte_queue.c  ****     /* Check whether we're going past the end of the buffer */
+ 123:byte_queue.c  ****     if (g_tail + len >= BUFFER_SIZE)
+ 122                 	2:
+ 123 007f 00 00 00 15 		.loc 1 127 0
+ 124 0081 03 37       		ld	AL,@g_tail
+ 125 0082 04 00 FF 84 		ld	X,#0x0400
+ 126 0084 00 00 00 00 		sub	X,@$XAP_AL
+ 126      00 2C 
+ 127                 		st	X,@(0x0001,Y)
+ 124:byte_queue.c  ****     {
+ 125:byte_queue.c  ****         /* Calculate how much space there is till the end of the buffer */
+ 126:byte_queue.c  ****         const uint16 available = BUFFER_SIZE - g_tail;
+ 128                 	1 130 0
+ 129 0087 00 00 00 15 		ld	AL,@g_tail
+ 130 0089 04 00 00 18 		ld	AH,@$XAP_AL
+ 131 008b 00 00 00 59 		add	AH,#g_queue
+ 132 008d 01 2B       		ld	AL,@(0x0001,Y)
+ 127:byte_queue.c  ****         
+ 128:byte_queue.c  ****         /* Copy data into the queue up to end of buffer */
+ 129:byte_queue.c  ****         MemCopy(&g_queue[g_tail], p_data, available);
+ 133                 	L,@(0,Y)
+ 134 008e 00 00 00 15 		ld	AL,@$XAP_AH
+ 135 0090 00 00 00 11 		ld	AH,@(0x0002,Y)
+ 136 0092 00 00 00 30 		bsr	memcpy
+ 137 0094 01 17       		.loc 1 133 0
+ 138 0095 00 27       		ld	AL,@(0x0003,Y)
+ 139 0096 00 00 00 15 		sub	AL,@(0x0001,Y)
+ 140 0098 02 13       		st	AL,@g_tail
+ 141 0099 00 00 00 00 		.loc 1 136 0
+ 141      00 9C 
+ 130:byte_queue.c  ****         
+ 131:byte_queue.c  ****         /* Update g_tail */
+ 132:byte_queue.c  ****         g_tail = len - available;
+ 142                 	0x0002,Y)
+ 143 009c 03 17       		ld	AH,@$XAP_AL
+ 144 009d 01 57       		add	AH,@(0x0001,Y)
+ 145 009e 00 00 00 25 		ld	AL,@g_tail
+ 133:byte_queue.c  ****         
+ 134:byte_queue.c  ****         /* Copy data from start of buffer */
+ 135:byte_queue.c  ****         MemCopy(g_queue, p_data + available, g_tail);
+ 146                 	AL,@(0,Y)
+ 147 00a0 02 17       		ld	AL,#g_queue
+ 148 00a1 00 00 00 11 		bsr	memcpy
+ 149 00a3 01 33       		bra	.L13
+ 150 00a4 00 00 00 15 	.L12:
+ 151 00a6 00 27       	.LBE2:
+ 152 00a7 00 00 00 14 		.loc 1 141 0
+ 153 00a9 00 00 00 00 		ld	AL,@g_tail
+ 153      00 9C 
+ 154 00ac 00 00 00 00 		ld	AH,@$XAP_AL
+ 154      00 E0 
+ 155                 		add	AH,#g_queue
+ 156                 		ld	AL,@(0x0003,Y)
+ 136:byte_queue.c  ****     }
+ 137:byte_queue.c  ****     else
+ 138:byte_queue.c  ****     {
+ 139:byte_queue.c  ****         /* Append data to tail of the queue */
+ 140:byte_queue.c  ****         MemCopy(&g_queue[g_tail], p_data, len);
+ 157                 	Y)
+ 158 00af 00 00 00 15 		ld	AL,@$XAP_AH
+ 159 00b1 00 00 00 11 		ld	AH,@(0x0002,Y)
+ 160 00b3 00 00 00 30 		bsr	memcpy
+ 161 00b5 03 17       		.loc 1 144 0
+ 162 00b6 00 27       		ld	AL,@g_tail
+ 163 00b7 00 00 00 15 		add	AL,@(0x0003,Y)
+ 164 00b9 02 13       		st	AL,@g_tail
+ 165 00ba 00 00 00 00 	.L13:
+ 165      00 9C 
+ 141:byte_queue.c  ****         
+ 142:byte_queue.c  ****         /* Update g_tail */
+ 143:byte_queue.c  ****         g_tail += len;
+ 166                 	46 0
+ 167 00bd 00 00 00 15 		leave	#0x0007
+ 168 00bf 03 37       	.LFE2:
+ 169 00c0 00 00 00 25 		.size	copyIntoBuffer, .-copyIntoBuffer
+ 170                 		.equ	__size_of_copyIntoBuffer,. - copyIntoBuffer
+ 144:byte_queue.c  ****     }
+ 145:byte_queue.c  **** }
+ 171                 	tion	.text.peekBuffer,"ax",@progbits
+ 172 00c2 07 0F       		.type	peekBuffer, @function
+ 173                 	peekBuffer:
+ 174                 	.LFB3:
+ 175                 		.loc 1 165 0
+ 176                 		enter	#0x0009
+ 177                 	.LCFI1:
+ 178                 		st	AL,@(0x0003,Y)
+ 179                 		st	AH,@(0x0004,Y)
+ 146:byte_queue.c  **** 
+ 147:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 148:byte_queue.c  ****  *  NAME
+ 149:byte_queue.c  ****  *      peekBuffer
+ 150:byte_queue.c  ****  *
+ 151:byte_queue.c  ****  *  DESCRIPTION
+ 152:byte_queue.c  ****  *      Read a given number of bytes from the buffer without removing any data.
+ 153:byte_queue.c  ****  *      If more data is requested than is available, then only the available
+ 154:byte_queue.c  ****  *      data is read.
+ 155:byte_queue.c  ****  *
+ 156:byte_queue.c  ****  * PARAMETERS
+ 157:byte_queue.c  ****  *      p_data [in]     Pointer to buffer to store read data in
+ 158:byte_queue.c  ****  *      len    [in]     Number of bytes of data to peek
+ 159:byte_queue.c  ****  *
+ 160:byte_queue.c  ****  * RETURNS
+ 161:byte_queue.c  ****  *      Number of bytes of data peeked.
+ 162:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 163:byte_queue.c  **** static uint16 peekBuffer(uint8 *p_data, uint16 len)
+ 164:byte_queue.c  **** {
+ 180                 	66 0
+ 181 0000 09 0B       		ld	AL,@(0x0004,Y)
+ 182                 		st	AL,@(0x0002,Y)
+ 183 0001 03 27       		.loc 1 169 0
+ 184 0002 04 23       		tst	@(0x0004,Y)
+ 165:byte_queue.c  ****     uint16 peeked = len;    /* Number of bytes of data peeked */
+ 185                 	.L15
+ 186 0003 04 17       		tst	@(0x0003,Y)
+ 187 0004 02 27       		bne	.L16
+ 166:byte_queue.c  ****     
+ 167:byte_queue.c  ****     /* Sanity check */
+ 168:byte_queue.c  ****     if ((len == 0) || (p_data == NULL))
+ 188                 	5:
+ 189 0005 04 9B       		.loc 1 170 0
+ 190 0006 00 00 00 00 		ld	AL,#0x0000
+ 190      00 F4 
+ 191 0009 03 9B       		st	AL,@(0x0007,Y)
+ 192 000a 00 00 00 00 		bra	.L17
+ 192      00 F0 
+ 193                 	.L16:
+ 169:byte_queue.c  ****         return 0;
+ 194                 	1 173 0
+ 195 000d 00 14       		ld	AH,@g_tail
+ 196 000e 07 27       		ld	AL,@g_head
+ 197 000f 00 00 00 00 		cmp	AH,@$XAP_AL
+ 197      00 E0 
+ 198                 		bcs	.L18
+ 170:byte_queue.c  ****     
+ 171:byte_queue.c  ****     /* Cannot peek more data than is available */
+ 172:byte_queue.c  ****     if (peeked > QUEUE_LENGTH)
+ 199                 	H,@g_tail
+ 200 0012 00 00 00 11 		ld	AL,@g_head
+ 201 0014 00 00 00 15 		ld	X,@$XAP_AH
+ 202 0016 00 00 00 81 		sub	X,@$XAP_AL
+ 203 0018 00 00 00 00 		st	X,@(0x0006,Y)
+ 203      00 FC 
+ 204 001b 00 00 00 11 		bra	.L19
+ 205 001d 00 00 00 15 	.L18:
+ 206 001f 00 00 00 19 		ld	AL,@g_tail
+ 207 0021 00 00 00 59 		ld	AH,@g_head
+ 208 0023 06 2B       		sub	AL,@$XAP_AH
+ 209 0024 00 00 00 00 		ld	X,@$XAP_AL
+ 209      00 E0 
+ 210                 		add	X,#0x0400
+ 211 0027 00 00 00 15 		st	X,@(0x0006,Y)
+ 212 0029 00 00 00 11 	.L19:
+ 213 002b 00 00 00 55 		ld	AL,@(0x0006,Y)
+ 214 002d 00 00 00 19 		cmp	AL,@(0x0002,Y)
+ 215 002f 04 00 00 38 		bcc	.L20
+ 216 0031 06 2B       		.loc 1 174 0
+ 217                 		ld	AH,@g_tail
+ 218 0032 06 17       		ld	AL,@g_head
+ 219 0033 02 87       		cmp	AH,@$XAP_AL
+ 220 0034 00 00 00 00 		bcs	.L21
+ 220      00 F8 
+ 173:byte_queue.c  ****         peeked = QUEUE_LENGTH;
+ 221                 	@g_head
+ 222 0037 00 00 00 11 		ld	X,@$XAP_AH
+ 223 0039 00 00 00 15 		sub	X,@$XAP_AL
+ 224 003b 00 00 00 81 		st	X,@(0x0005,Y)
+ 225 003d 00 00 00 00 		bra	.L22
+ 225      00 FC 
+ 226 0040 00 00 00 11 	.L21:
+ 227 0042 00 00 00 15 		ld	AL,@g_tail
+ 228 0044 00 00 00 19 		ld	AH,@g_head
+ 229 0046 00 00 00 59 		sub	AL,@$XAP_AH
+ 230 0048 05 2B       		ld	X,@$XAP_AL
+ 231 0049 00 00 00 00 		add	X,#0x0400
+ 231      00 E0 
+ 232                 		st	X,@(0x0005,Y)
+ 233 004c 00 00 00 15 	.L22:
+ 234 004e 00 00 00 11 		ld	AL,@(0x0005,Y)
+ 235 0050 00 00 00 55 		st	AL,@(0x0002,Y)
+ 236 0052 00 00 00 19 	.L20:
+ 237 0054 04 00 00 38 		.loc 1 177 0
+ 238 0056 05 2B       		ld	AL,@g_head
+ 239                 		add	AL,@(0x0002,Y)
+ 240 0057 05 17       		cmp	AL,#0x03ff
+ 241 0058 02 27       		bcz	.L23
+ 242                 	.LBB3:
+ 174:byte_queue.c  ****     
+ 175:byte_queue.c  ****     /* Check whether we're going past the end of the buffer */
+ 176:byte_queue.c  ****     if (g_head + peeked >= BUFFER_SIZE)
+ 243                 	g_head
+ 244 0059 00 00 00 15 		ld	X,#0x0400
+ 245 005b 02 37       		sub	X,@$XAP_AL
+ 246 005c 04 00 FF 84 		st	X,@(0x0001,Y)
+ 247 005e 00 00 00 00 		.loc 1 183 0
+ 247      00 2C 
+ 248                 		ld	AL,@g_head
+ 177:byte_queue.c  ****     {
+ 178:byte_queue.c  ****         /* Calculate how much space there is till the end of the buffer */
+ 179:byte_queue.c  ****         const uint16 available = BUFFER_SIZE - g_head;
+ 249                 	,@$XAP_AL
+ 250 0061 00 00 00 15 		add	AH,#g_queue
+ 251 0063 04 00 00 18 		ld	AL,@(0x0001,Y)
+ 252 0065 00 00 00 59 		st	AL,@(0,Y)
+ 253 0067 01 2B       		ld	AL,@(0x0003,Y)
+ 180:byte_queue.c  ****         
+ 181:byte_queue.c  ****         /* Copy data up to end of buffer */
+ 182:byte_queue.c  ****         MemCopy(p_data, &g_queue[g_head], available);
+ 254                 	memcpy
+ 255 0068 00 00 00 15 		.loc 1 186 0
+ 256 006a 00 00 00 11 		ld	AL,@(0x0002,Y)
+ 257 006c 00 00 00 30 		sub	AL,@(0x0001,Y)
+ 258 006e 01 17       		st	AL,@g_peek
+ 259 006f 00 27       		.loc 1 189 0
+ 260 0070 03 17       		ld	AL,@(0x0003,Y)
+ 261 0071 00 00 00 00 		ld	AH,@$XAP_AL
+ 261      00 9C 
+ 183:byte_queue.c  ****         
+ 184:byte_queue.c  ****         /* Update g_peek */
+ 185:byte_queue.c  ****         g_peek = peeked - available;
+ 262                 	@(0x0001,Y)
+ 263 0074 02 17       		ld	AL,@g_peek
+ 264 0075 01 57       		st	AL,@(0,Y)
+ 265 0076 00 00 00 25 		ld	AL,@$XAP_AH
+ 186:byte_queue.c  ****         
+ 187:byte_queue.c  ****         /* Copy data from start of buffer */
+ 188:byte_queue.c  ****         MemCopy(p_data + available, g_queue, g_peek);
+ 266                 	AH,#g_queue
+ 267 0078 03 17       		bsr	memcpy
+ 268 0079 00 00 00 11 		bra	.L24
+ 269 007b 01 33       	.L23:
+ 270 007c 00 00 00 15 	.LBE3:
+ 271 007e 00 27       		.loc 1 194 0
+ 272 007f 00 00 00 15 		ld	AL,@g_head
+ 273 0081 00 00 00 10 		ld	AH,@$XAP_AL
+ 274 0083 00 00 00 00 		add	AH,#g_queue
+ 274      00 9C 
+ 275 0086 00 00 00 00 		ld	AL,@(0x0002,Y)
+ 275      00 E0 
+ 276                 		st	AL,@(0,Y)
+ 277                 		ld	AL,@(0x0003,Y)
+ 189:byte_queue.c  ****     }
+ 190:byte_queue.c  ****     else
+ 191:byte_queue.c  ****     {
+ 192:byte_queue.c  ****         /* Peek data starting from the head of the queue */
+ 193:byte_queue.c  ****         MemCopy(p_data, &g_queue[g_head], peeked);
+ 278                 		.loc 1 197 0
+ 279 0089 00 00 00 15 		ld	AL,@g_head
+ 280 008b 00 00 00 11 		add	AL,@(0x0002,Y)
+ 281 008d 00 00 00 30 		st	AL,@g_peek
+ 282 008f 02 17       	.L24:
+ 283 0090 00 27       		.loc 1 200 0
+ 284 0091 03 17       		ld	AL,@(0x0002,Y)
+ 285 0092 00 00 00 00 		st	AL,@(0x0007,Y)
+ 285      00 9C 
+ 194:byte_queue.c  ****         
+ 195:byte_queue.c  ****         /* Update g_peek */
+ 196:byte_queue.c  ****         g_peek = g_head + peeked;
+ 286                 	d	AL,@(0x0007,Y)
+ 287 0095 00 00 00 15 		.loc 1 201 0
+ 288 0097 02 37       		leave	#0x0009
+ 289 0098 00 00 00 25 	.LFE3:
+ 290                 		.size	peekBuffer, .-peekBuffer
+ 197:byte_queue.c  ****     }
+ 198:byte_queue.c  ****     
+ 199:byte_queue.c  ****     return peeked;
+ 291                 		__size_of_peekBuffer,. - peekBuffer
+ 292 009a 02 17       		.section	.text.BQSafeQueueBytes,"ax",@progbits
+ 293 009b 07 27       		.global	BQSafeQueueBytes
+ 294                 		.type	BQSafeQueueBytes, @function
+ 295 009c 07 17       	BQSafeQueueBytes:
+ 200:byte_queue.c  **** }
+ 296                 	:
+ 297 009d 09 0F       		.loc 1 224 0
+ 298                 		enter	#0x0005
+ 299                 	.LCFI2:
+ 300                 		st	AL,@(0x0001,Y)
+ 301                 		st	AH,@(0x0002,Y)
+ 302                 		.loc 1 226 0
+ 303                 		ld	AH,@g_tail
+ 304                 		ld	AL,@g_head
+ 305                 		cmp	AH,@$XAP_AL
+ 201:byte_queue.c  **** 
+ 202:byte_queue.c  **** /*============================================================================*
+ 203:byte_queue.c  ****  *  Public Function Implementations
+ 204:byte_queue.c  ****  *============================================================================*/
+ 205:byte_queue.c  **** 
+ 206:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 207:byte_queue.c  ****  *  NAME
+ 208:byte_queue.c  ****  *      BQSafeQueueBytes
+ 209:byte_queue.c  ****  *
+ 210:byte_queue.c  ****  *  DESCRIPTION
+ 211:byte_queue.c  ****  *      Queue the supplied data if there is sufficient space available.
+ 212:byte_queue.c  ****  *      If there is not enough space FALSE is returned instead.
+ 213:byte_queue.c  ****  *
+ 214:byte_queue.c  ****  * PARAMETERS
+ 215:byte_queue.c  ****  *      p_data [in]     Pointer to the data to be queued
+ 216:byte_queue.c  ****  *      len    [in]     Number of bytes of data to be queued
+ 217:byte_queue.c  ****  *
+ 218:byte_queue.c  ****  * RETURNS
+ 219:byte_queue.c  ****  *      TRUE if the data is queued successfully
+ 220:byte_queue.c  ****  *      FALSE if there is not enough space in the queue
+ 221:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 222:byte_queue.c  **** bool BQSafeQueueBytes(const uint8 *p_data, uint16 len)
+ 223:byte_queue.c  **** {
+ 306                 		ld	AL,@g_head
+ 307 0000 05 0B       		ld	AH,@g_tail
+ 308                 		sub	AL,@$XAP_AH
+ 309 0001 01 27       		ld	X,@$XAP_AL
+ 310 0002 02 23       		add	X,#0x03ff
+ 224:byte_queue.c  ****     /* Check whether there is enough space available in the buffer */
+ 225:byte_queue.c  ****     bool ret_val = (QUEUE_FREE >= len);
+ 311                 	,@(0x0003,Y)
+ 312 0003 00 00 00 11 		bra	.L28
+ 313 0005 00 00 00 15 	.L27:
+ 314 0007 00 00 00 81 		ld	AL,@g_head
+ 315 0009 00 00 00 00 		ld	AH,@g_tail
+ 315      00 FC 
+ 316 000c 00 00 00 15 		sub	AL,@$XAP_AH
+ 317 000e 00 00 00 11 		ld	X,@$XAP_AL
+ 318 0010 00 00 00 55 		add	X,#0xffff
+ 319 0012 00 00 00 19 		st	X,@(0x0003,Y)
+ 320 0014 04 00 FF 38 	.L28:
+ 321 0016 03 2B       		ld	AL,#0x0000
+ 322 0017 00 00 00 00 		st	AL,@(0,Y)
+ 322      00 E0 
+ 323                 		ld	AL,@(0x0003,Y)
+ 324 001a 00 00 00 15 		cmp	AL,@(0x0002,Y)
+ 325 001c 00 00 00 11 		bcs	.L29
+ 326 001e 00 00 00 55 		ld	AL,#0x0001
+ 327 0020 00 00 00 19 		st	AL,@(0,Y)
+ 328 0022 FF 38       	.L29:
+ 329 0023 03 2B       		.loc 1 229 0
+ 330                 		tst	@(0,Y)
+ 331 0024 00 14       		beq	.L30
+ 332 0025 00 27       		.loc 1 230 0
+ 333 0026 03 17       		ld	AL,@(0x0001,Y)
+ 334 0027 02 87       		ld	AH,@(0x0002,Y)
+ 335 0028 00 00 00 00 		bsr	copyIntoBuffer
+ 335      00 FC 
+ 336 002b 01 14       	.L30:
+ 337 002c 00 27       		.loc 1 232 0
+ 338                 		ld	AL,@(0,Y)
+ 226:byte_queue.c  ****     
+ 227:byte_queue.c  ****     /* If so, copy the data into the buffer */
+ 228:byte_queue.c  ****     if (ret_val)
+ 339                 	
+ 340 002d 00 9B       	.LFE4:
+ 341 002e 00 00 00 00 		.size	BQSafeQueueBytes, .-BQSafeQueueBytes
+ 341      00 F4 
+ 229:byte_queue.c  ****         copyIntoBuffer(p_data, len);
+ 342                 	global	__size_of_BQSafeQueueBytes
+ 343 0031 01 17       		.equ	__size_of_BQSafeQueueBytes,. - BQSafeQueueBytes
+ 344 0032 02 13       		.section	.text.BQForceQueueBytes,"ax",@progbits
+ 345 0033 00 00 00 00 		.global	BQForceQueueBytes
+ 345      00 9C 
+ 346                 		.type	BQForceQueueBytes, @function
+ 230:byte_queue.c  ****     
+ 231:byte_queue.c  ****     return ret_val;
+ 347                 	ceQueueBytes:
+ 348 0036 00 17       	.LFB5:
+ 232:byte_queue.c  **** }
+ 349                 	loc 1 252 0
+ 350 0037 05 0F       		enter	#0x0003
+ 351                 	.LCFI3:
+ 352                 		st	AL,@(0,Y)
+ 353                 		st	AH,@(0x0001,Y)
+ 354                 		.loc 1 254 0
+ 355                 		ld	AL,@(0,Y)
+ 356                 		ld	AH,@(0x0001,Y)
+ 357                 		bsr	copyIntoBuffer
+ 358                 		.loc 1 255 0
+ 359                 		leave	#0x0003
+ 233:byte_queue.c  **** 
+ 234:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 235:byte_queue.c  ****  *  NAME
+ 236:byte_queue.c  ****  *      BQForceQueueBytes
+ 237:byte_queue.c  ****  *
+ 238:byte_queue.c  ****  *  DESCRIPTION
+ 239:byte_queue.c  ****  *      Queue the supplied data. If there is not enough space then data at the
+ 240:byte_queue.c  ****  *      head of the queue is overwritten and the head of the queue moved to
+ 241:byte_queue.c  ****  *      the end of the new data.
+ 242:byte_queue.c  ****  *
+ 243:byte_queue.c  ****  * PARAMETERS
+ 244:byte_queue.c  ****  *      p_data [in]     Pointer to the data to be queued
+ 245:byte_queue.c  ****  *      len    [in]     Number of bytes of data to be queued
+ 246:byte_queue.c  ****  *
+ 247:byte_queue.c  ****  * RETURNS
+ 248:byte_queue.c  ****  *      Nothing
+ 249:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 250:byte_queue.c  **** void BQForceQueueBytes(const uint8 *p_data, uint16 len)
+ 251:byte_queue.c  **** {
+ 360                 	ze	BQForceQueueBytes, .-BQForceQueueBytes
+ 361 0000 03 0B       		.global	__size_of_BQForceQueueBytes
+ 362                 		.equ	__size_of_BQForceQueueBytes,. - BQForceQueueBytes
+ 363 0001 00 27       		.section	.text.BQGetBufferCapacity,"ax",@progbits
+ 364 0002 01 23       		.global	BQGetBufferCapacity
+ 252:byte_queue.c  ****     /* Copy data into the buffer whether or not space is available */
+ 253:byte_queue.c  ****     copyIntoBuffer(p_data, len);
+ 365                 	e	BQGetBufferCapacity, @function
+ 366 0003 00 17       	BQGetBufferCapacity:
+ 367 0004 01 13       	.LFB6:
+ 368 0005 00 00 00 00 		.loc 1 271 0
+ 368      00 9C 
+ 254:byte_queue.c  **** }
+ 369                 	c 1 272 0
+ 370 0008 03 0F       		ld	AL,#0x03ff
+ 371                 		.loc 1 273 0
+ 372                 		bra	0,X
+ 373                 	.LFE6:
+ 374                 		.size	BQGetBufferCapacity, .-BQGetBufferCapacity
+ 375                 		.global	__size_of_BQGetBufferCapacity
+ 376                 		.equ	__size_of_BQGetBufferCapacity,. - BQGetBufferCapacity
+ 377                 		.section	.text.BQGetDataSize,"ax",@progbits
+ 378                 		.global	BQGetDataSize
+ 379                 		.type	BQGetDataSize, @function
+ 255:byte_queue.c  **** 
+ 256:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 257:byte_queue.c  ****  *  NAME
+ 258:byte_queue.c  ****  *      BQGetBufferCapacity
+ 259:byte_queue.c  ****  *
+ 260:byte_queue.c  ****  *  DESCRIPTION
+ 261:byte_queue.c  ****  *      Return the total size of the buffer.
+ 262:byte_queue.c  ****  *
+ 263:byte_queue.c  ****  * PARAMETERS
+ 264:byte_queue.c  ****  *      None
+ 265:byte_queue.c  ****  *
+ 266:byte_queue.c  ****  * RETURNS
+ 267:byte_queue.c  ****  *      Total buffer size in bytes
+ 268:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 269:byte_queue.c  **** uint16 BQGetBufferCapacity(void)
+ 270:byte_queue.c  **** {
+ 380                 	ze:
+ 271:byte_queue.c  ****     return BUFFER_LEN;
+ 381                 	LFB7:
+ 382 0000 04 00 FF 14 		.loc 1 289 0
+ 272:byte_queue.c  **** }
+ 383                 	nter	#0x0002
+ 384 0002 00 E2       	.LCFI4:
+ 385                 		.loc 1 290 0
+ 386                 		ld	AH,@g_tail
+ 387                 		ld	AL,@g_head
+ 388                 		cmp	AH,@$XAP_AL
+ 389                 		bcs	.L37
+ 390                 		ld	AH,@g_tail
+ 391                 		ld	AL,@g_head
+ 392                 		ld	X,@$XAP_AH
+ 393                 		sub	X,@$XAP_AL
+ 273:byte_queue.c  **** 
+ 274:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 275:byte_queue.c  ****  *  NAME
+ 276:byte_queue.c  ****  *      BQGetDataSize
+ 277:byte_queue.c  ****  *
+ 278:byte_queue.c  ****  *  DESCRIPTION
+ 279:byte_queue.c  ****  *      Return the amount of data currently in the queue.
+ 280:byte_queue.c  ****  *
+ 281:byte_queue.c  ****  * PARAMETERS
+ 282:byte_queue.c  ****  *      None
+ 283:byte_queue.c  ****  *
+ 284:byte_queue.c  ****  * RETURNS
+ 285:byte_queue.c  ****  *      Size of data currently stored in the queue in bytes.
+ 286:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 287:byte_queue.c  **** uint16 BQGetDataSize(void)
+ 288:byte_queue.c  **** {
+ 394                 	)
+ 395 0000 02 0B       		bra	.L38
+ 396                 	.L37:
+ 289:byte_queue.c  ****     return QUEUE_LENGTH;
+ 397                 		AL,@g_tail
+ 398 0001 00 00 00 11 		ld	AH,@g_head
+ 399 0003 00 00 00 15 		sub	AL,@$XAP_AH
+ 400 0005 00 00 00 81 		ld	X,@$XAP_AL
+ 401 0007 00 00 00 00 		add	X,#0x0400
+ 401      00 FC 
+ 402 000a 00 00 00 11 		st	X,@(0,Y)
+ 403 000c 00 00 00 15 	.L38:
+ 404 000e 00 00 00 19 		ld	AL,@(0,Y)
+ 405 0010 00 00 00 59 		.loc 1 291 0
+ 406 0012 00 2B       		leave	#0x0002
+ 407 0013 00 00 00 00 	.LFE7:
+ 407      00 E0 
+ 408                 		.size	BQGetDataSize, .-BQGetDataSize
+ 409 0016 00 00 00 15 		.global	__size_of_BQGetDataSize
+ 410 0018 00 00 00 11 		.equ	__size_of_BQGetDataSize,. - BQGetDataSize
+ 411 001a 00 00 00 55 		.section	.text.BQGetAvailableSize,"ax",@progbits
+ 412 001c 00 00 00 19 		.global	BQGetAvailableSize
+ 413 001e 04 00 00 38 		.type	BQGetAvailableSize, @function
+ 414 0020 00 2B       	BQGetAvailableSize:
+ 415                 	.LFB8:
+ 416 0021 00 17       		.loc 1 307 0
+ 290:byte_queue.c  **** }
+ 417                 	5:
+ 418 0022 02 0F       		.loc 1 308 0
+ 419                 		ld	AH,@g_tail
+ 420                 		ld	AL,@g_head
+ 421                 		cmp	AH,@$XAP_AL
+ 422                 		bcs	.L41
+ 423                 		ld	AL,@g_head
+ 424                 		ld	AH,@g_tail
+ 425                 		sub	AL,@$XAP_AH
+ 426                 		ld	X,@$XAP_AL
+ 427                 		add	X,#0x03ff
+ 291:byte_queue.c  **** 
+ 292:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 293:byte_queue.c  ****  *  NAME
+ 294:byte_queue.c  ****  *      BQGetAvailableSize
+ 295:byte_queue.c  ****  *
+ 296:byte_queue.c  ****  *  DESCRIPTION
+ 297:byte_queue.c  ****  *      Return the amount of free space available in the buffer.
+ 298:byte_queue.c  ****  *
+ 299:byte_queue.c  ****  * PARAMETERS
+ 300:byte_queue.c  ****  *      None
+ 301:byte_queue.c  ****  *
+ 302:byte_queue.c  ****  * RETURNS
+ 303:byte_queue.c  ****  *      Size of free space available in the buffer in bytes.
+ 304:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 305:byte_queue.c  **** uint16 BQGetAvailableSize(void)
+ 306:byte_queue.c  **** {
+ 428                 	)
+ 429 0000 02 0B       		bra	.L42
+ 430                 	.L41:
+ 307:byte_queue.c  ****     return QUEUE_FREE;
+ 431                 		AL,@g_head
+ 432 0001 00 00 00 11 		ld	AH,@g_tail
+ 433 0003 00 00 00 15 		sub	AL,@$XAP_AH
+ 434 0005 00 00 00 81 		ld	X,@$XAP_AL
+ 435 0007 00 00 00 00 		add	X,#0xffff
+ 435      00 FC 
+ 436 000a 00 00 00 15 		st	X,@(0,Y)
+ 437 000c 00 00 00 11 	.L42:
+ 438 000e 00 00 00 55 		ld	AL,@(0,Y)
+ 439 0010 00 00 00 19 		.loc 1 309 0
+ 440 0012 04 00 FF 38 		leave	#0x0002
+ 441 0014 00 2B       	.LFE8:
+ 442 0015 00 00 00 00 		.size	BQGetAvailableSize, .-BQGetAvailableSize
+ 442      00 E0 
+ 443                 		.global	__size_of_BQGetAvailableSize
+ 444 0018 00 00 00 15 		.equ	__size_of_BQGetAvailableSize,. - BQGetAvailableSize
+ 445 001a 00 00 00 11 		.section	.text.BQClearBuffer,"ax",@progbits
+ 446 001c 00 00 00 55 		.global	BQClearBuffer
+ 447 001e 00 00 00 19 		.type	BQClearBuffer, @function
+ 448 0020 FF 38       	BQClearBuffer:
+ 449 0021 00 2B       	.LFB9:
+ 450                 		.loc 1 325 0
+ 451 0022 00 17       		.loc 1 327 0
+ 308:byte_queue.c  **** }
+ 452                 	,@g_tail
+ 453 0023 02 0F       		ld	AL,@g_tail
+ 454                 		st	AL,@g_peek
+ 455                 		ld	AL,@g_peek
+ 456                 		st	AL,@g_head
+ 457                 		.loc 1 328 0
+ 458                 		bra	0,X
+ 459                 	.LFE9:
+ 460                 		.size	BQClearBuffer, .-BQClearBuffer
+ 461                 		.global	__size_of_BQClearBuffer
+ 462                 		.equ	__size_of_BQClearBuffer,. - BQClearBuffer
+ 309:byte_queue.c  **** 
+ 310:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 311:byte_queue.c  ****  *  NAME
+ 312:byte_queue.c  ****  *      BQClearBuffer
+ 313:byte_queue.c  ****  *
+ 314:byte_queue.c  ****  *  DESCRIPTION
+ 315:byte_queue.c  ****  *      Clear buffer contents leaving the queue empty.
+ 316:byte_queue.c  ****  *
+ 317:byte_queue.c  ****  * PARAMETERS
+ 318:byte_queue.c  ****  *      None
+ 319:byte_queue.c  ****  *
+ 320:byte_queue.c  ****  * RETURNS
+ 321:byte_queue.c  ****  *      Nothing
+ 322:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 323:byte_queue.c  **** void BQClearBuffer(void)
+ 324:byte_queue.c  **** {
+ 463                 	text.BQPopBytes,"ax",@progbits
+ 325:byte_queue.c  ****     /* Reset queue pointers */
+ 326:byte_queue.c  ****     g_head = g_peek = g_tail = 0;
+ 464                 	.global	BQPopBytes
+ 465 0000 00 14       		.type	BQPopBytes, @function
+ 466 0001 00 00 00 25 	BQPopBytes:
+ 467 0003 00 00 00 15 	.LFB10:
+ 468 0005 00 00 00 25 		.loc 1 349 0
+ 469 0007 00 00 00 15 		enter	#0x0004
+ 470 0009 00 00 00 25 	.LCFI6:
+ 327:byte_queue.c  **** }
+ 471                 	@(0x0001,Y)
+ 472 000b 00 E2       		st	AH,@(0x0002,Y)
+ 473                 		.loc 1 351 0
+ 474                 		ld	AL,@(0x0001,Y)
+ 475                 		ld	AH,@(0x0002,Y)
+ 476                 		bsr	peekBuffer
+ 477                 		st	AL,@(0,Y)
+ 478                 		.loc 1 354 0
+ 479                 		bsr	BQCommitLastPeek
+ 480                 		.loc 1 357 0
+ 481                 		ld	AL,@(0,Y)
+ 328:byte_queue.c  **** 
+ 329:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 330:byte_queue.c  ****  *  NAME
+ 331:byte_queue.c  ****  *      BQPopBytes
+ 332:byte_queue.c  ****  *
+ 333:byte_queue.c  ****  *  DESCRIPTION
+ 334:byte_queue.c  ****  *      Extract up to the specified number of bytes from the queue increasing
+ 335:byte_queue.c  ****  *      the available size by the number of bytes extracted. If not enough data
+ 336:byte_queue.c  ****  *      is held in the queue then the function returns immediately with
+ 337:byte_queue.c  ****  *      whatever data is available.
+ 338:byte_queue.c  ****  *
+ 339:byte_queue.c  ****  * PARAMETERS
+ 340:byte_queue.c  ****  *      p_data [out]    Pointer to a buffer to store the extracted data in
+ 341:byte_queue.c  ****  *      len    [in]     Number of bytes of data to be extracted
+ 342:byte_queue.c  ****  *
+ 343:byte_queue.c  ****  * RETURNS
+ 344:byte_queue.c  ****  *      Number of bytes actually extracted, may be fewer than requested if not
+ 345:byte_queue.c  ****  *      enough data is available.
+ 346:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 347:byte_queue.c  **** uint16 BQPopBytes(uint8 *p_data, uint16 len)
+ 348:byte_queue.c  **** {
+ 482                 	 0
+ 483 0000 04 0B       		leave	#0x0004
+ 484                 	.LFE10:
+ 485 0001 01 27       		.size	BQPopBytes, .-BQPopBytes
+ 486 0002 02 23       		.global	__size_of_BQPopBytes
+ 349:byte_queue.c  ****     /* Copy the data into the return buffer */
+ 350:byte_queue.c  ****     uint16 peeked = peekBuffer(p_data, len);
+ 487                 		__size_of_BQPopBytes,. - BQPopBytes
+ 488 0003 01 17       		.section	.text.BQPeekBytes,"ax",@progbits
+ 489 0004 02 13       		.global	BQPeekBytes
+ 490 0005 00 00 00 00 		.type	BQPeekBytes, @function
+ 490      00 9C 
+ 491 0008 00 27       	BQPeekBytes:
+ 351:byte_queue.c  ****     
+ 352:byte_queue.c  ****     /* Remove the peeked data from the queue */
+ 353:byte_queue.c  ****     BQCommitLastPeek();
+ 492                 	1:
+ 493 0009 00 00 00 00 		.loc 1 378 0
+ 493      00 9C 
+ 354:byte_queue.c  ****     
+ 355:byte_queue.c  ****     /* Return number of bytes peeked */
+ 356:byte_queue.c  ****     return peeked;
+ 494                 	nter	#0x0003
+ 495 000c 00 17       	.LCFI7:
+ 357:byte_queue.c  **** }
+ 496                 	t	AL,@(0,Y)
+ 497 000d 04 0F       		st	AH,@(0x0001,Y)
+ 498                 		.loc 1 380 0
+ 499                 		ld	AL,@(0,Y)
+ 500                 		ld	AH,@(0x0001,Y)
+ 501                 		bsr	peekBuffer
+ 502                 		.loc 1 381 0
+ 503                 		leave	#0x0003
+ 504                 	.LFE11:
+ 505                 		.size	BQPeekBytes, .-BQPeekBytes
+ 506                 		.global	__size_of_BQPeekBytes
+ 358:byte_queue.c  **** 
+ 359:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 360:byte_queue.c  ****  *  NAME
+ 361:byte_queue.c  ****  *      BQPeekBytes
+ 362:byte_queue.c  ****  *
+ 363:byte_queue.c  ****  *  DESCRIPTION
+ 364:byte_queue.c  ****  *      Peek up to the specified number of bytes from the queue, without
+ 365:byte_queue.c  ****  *      modifying the buffer. If not enough data is held in the queue then
+ 366:byte_queue.c  ****  *      the function returns immediately with whatever data is available.
+ 367:byte_queue.c  ****  *
+ 368:byte_queue.c  ****  * PARAMETERS
+ 369:byte_queue.c  ****  *      p_data [out]    Pointer to a buffer to store the peeked data in
+ 370:byte_queue.c  ****  *      len    [in]     Number of bytes of data to be peeked
+ 371:byte_queue.c  ****  *
+ 372:byte_queue.c  ****  * RETURNS
+ 373:byte_queue.c  ****  *      Number of bytes actually peeked, may be fewer than requested if not
+ 374:byte_queue.c  ****  *      enough data is available.
+ 375:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 376:byte_queue.c  **** uint16 BQPeekBytes(uint8 *p_data, uint16 len)
+ 377:byte_queue.c  **** {
+ 507                 	e_of_BQPeekBytes,. - BQPeekBytes
+ 508 0000 03 0B       		.section	.text.BQCommitLastPeek,"ax",@progbits
+ 509                 		.global	BQCommitLastPeek
+ 510 0001 00 27       		.type	BQCommitLastPeek, @function
+ 511 0002 01 23       	BQCommitLastPeek:
+ 378:byte_queue.c  ****     /* Peek into the buffer */
+ 379:byte_queue.c  ****     return peekBuffer(p_data, len);
+ 512                 	2:
+ 513 0003 00 17       		.loc 1 398 0
+ 514 0004 01 13       		.loc 1 400 0
+ 515 0005 00 00 00 00 		ld	AL,@g_peek
+ 515      00 9C 
+ 380:byte_queue.c  **** }
+ 516                 	AL,@g_head
+ 517 0008 03 0F       		.loc 1 401 0
+ 518                 		bra	0,X
+ 519                 	.LFE12:
+ 520                 		.size	BQCommitLastPeek, .-BQCommitLastPeek
+ 521                 		.global	__size_of_BQCommitLastPeek
+ 522                 		.equ	__size_of_BQCommitLastPeek,. - BQCommitLastPeek
+ 523                 		.section	.bss.g_queue,"aw",@nobits
+ 524                 		.type	g_queue, @object
+ 525                 		.size	g_queue, 1024
+ 526                 	g_queue:
+ 381:byte_queue.c  **** 
+ 382:byte_queue.c  **** /*----------------------------------------------------------------------------*
+ 383:byte_queue.c  ****  *  NAME
+ 384:byte_queue.c  ****  *      BQCommitLastPeek
+ 385:byte_queue.c  ****  *
+ 386:byte_queue.c  ****  *  DESCRIPTION
+ 387:byte_queue.c  ****  *      Remove from the queue the data that was returned in the last call to
+ 388:byte_queue.c  ****  *      BQPeekBytes.
+ 389:byte_queue.c  ****  *
+ 390:byte_queue.c  ****  * PARAMETERS
+ 391:byte_queue.c  ****  *      None
+ 392:byte_queue.c  ****  *
+ 393:byte_queue.c  ****  * RETURNS
+ 394:byte_queue.c  ****  *      Nothing
+ 395:byte_queue.c  ****  *----------------------------------------------------------------------------*/
+ 396:byte_queue.c  **** void BQCommitLastPeek(void)
+ 397:byte_queue.c  **** {
+ 527                 	4
+ 398:byte_queue.c  ****     /* Update g_head to point to current g_peek location */
+ 399:byte_queue.c  ****     g_head = g_peek;
+ 528                 	.section	.debug_frame,"",@progbits
+ 529 0000 00 00 00 15 	.Lframe0:
+ 530 0002 00 00 00 25 		.4byte	.LECIE0-.LSCIE0
+ 400:byte_queue.c  **** }
+ 531                 	CIE0:
+ 532 0004 00 E2       		.4byte	0xffffffff
+ 533                 		.1byte	0x1
+ 534                 		.ascii "\000"
+ 535                 		.1byte	0x1
+ 536                 		.1byte	0x7f
+ 537                 		.1byte	0x3
+ 538                 		.1byte	0xc
+ 539                 		.1byte	0x5
+ 540                 		.1byte	0x0
+ 541 0000 00 00 00 00 		.p2align	2
+ 541      00 00 00 00 
+ 541      00 00 00 00 
+ 541      00 00 00 00 
+ 541      00 00 00 00 
+ 542                 	.LECIE0:
+ 543                 	.LSFDE0:
+ 544 0000 00 00 00 00 		.4byte	.LEFDE0-.LASFDE0
+ 545                 	.LASFDE0:
+ 546 0002 FF FF FF FF 		.4byte	.Lframe0
+ 547 0004 01          		.4byte	.LFB2
+ 548 0004 00          		.4byte	.LFE2-.LFB2
+ 549 0005 01          		.1byte	0x4
+ 550 0005 7F          		.4byte	.LCFI0-.LFB2
+ 551 0006 03          		.1byte	0xe
+ 552 0006 0C          		.1byte	0x7
+ 553 0007 05          		.1byte	0x83
+ 554 0007 00          		.1byte	0x1
+ 555                 		.p2align	2
+ 556                 	.LEFDE0:
+ 557                 	.LSFDE2:
+ 558 0008 00 00 00 00 		.4byte	.LEFDE2-.LASFDE2
+ 559                 	.LASFDE2:
+ 560 000a 00 00 00 00 		.4byte	.Lframe0
+ 561 000c 00 00 00 00 		.4byte	.LFB3
+ 562 000e 00 00 00 00 		.4byte	.LFE3-.LFB3
+ 563 0010 41          		.1byte	0x4
+ 564                 		.4byte	.LCFI1-.LFB3
+ 565 0010 0E          		.1byte	0xe
+ 566 0011 07          		.1byte	0x9
+ 567 0011 83          		.1byte	0x83
+ 568 0012 01          		.1byte	0x1
+ 569 0012 00 00 00    		.p2align	2
+ 570                 	.LEFDE2:
+ 571                 	.LSFDE4:
+ 572 0014 00 00 00 00 		.4byte	.LEFDE4-.LASFDE4
+ 573                 	.LASFDE4:
+ 574 0016 00 00 00 00 		.4byte	.Lframe0
+ 575 0018 00 00 00 00 		.4byte	.LFB4
+ 576 001a 00 00 00 00 		.4byte	.LFE4-.LFB4
+ 577 001c 41          		.1byte	0x4
+ 578                 		.4byte	.LCFI2-.LFB4
+ 579 001c 0E          		.1byte	0xe
+ 580 001d 09          		.1byte	0x5
+ 581 001d 83          		.1byte	0x83
+ 582 001e 01          		.1byte	0x1
+ 583 001e 00 00 00    		.p2align	2
+ 584                 	.LEFDE4:
+ 585                 	.LSFDE6:
+ 586 0020 00 00 00 00 		.4byte	.LEFDE6-.LASFDE6
+ 587                 	.LASFDE6:
+ 588 0022 00 00 00 00 		.4byte	.Lframe0
+ 589 0024 00 00 00 00 		.4byte	.LFB5
+ 590 0026 00 00 00 00 		.4byte	.LFE5-.LFB5
+ 591 0028 41          		.1byte	0x4
+ 592                 		.4byte	.LCFI3-.LFB5
+ 593 0028 0E          		.1byte	0xe
+ 594 0029 05          		.1byte	0x3
+ 595 0029 83          		.1byte	0x83
+ 596 002a 01          		.1byte	0x1
+ 597 002a 00 00 00    		.p2align	2
+ 598                 	.LEFDE6:
+ 599                 	.LSFDE8:
+ 600 002c 00 00 00 00 		.4byte	.LEFDE8-.LASFDE8
+ 601                 	.LASFDE8:
+ 602 002e 00 00 00 00 		.4byte	.Lframe0
+ 603 0030 00 00 00 00 		.4byte	.LFB6
+ 604 0032 00 00 00 00 		.4byte	.LFE6-.LFB6
+ 605 0034 41          		.p2align	2
+ 606                 	.LEFDE8:
+ 607 0034 0E          	.LSFDE10:
+ 608 0035 03          		.4byte	.LEFDE10-.LASFDE10
+ 609 0035 83          	.LASFDE10:
+ 610 0036 01          		.4byte	.Lframe0
+ 611 0036 00 00 00    		.4byte	.LFB7
+ 612                 		.4byte	.LFE7-.LFB7
+ 613                 		.1byte	0x4
+ 614 0038 00 00 00 00 		.4byte	.LCFI4-.LFB7
+ 615                 		.1byte	0xe
+ 616 003a 00 00 00 00 		.1byte	0x2
+ 617 003c 00 00 00 00 		.1byte	0x83
+ 618 003e 00 00 00 03 		.1byte	0x1
+ 619                 		.p2align	2
+ 620                 	.LEFDE10:
+ 621                 	.LSFDE12:
+ 622 0040 00 00 00 00 		.4byte	.LEFDE12-.LASFDE12
+ 623                 	.LASFDE12:
+ 624 0042 00 00 00 00 		.4byte	.Lframe0
+ 625 0044 00 00 00 00 		.4byte	.LFB8
+ 626 0046 00 00 00 00 		.4byte	.LFE8-.LFB8
+ 627 0048 41          		.1byte	0x4
+ 628                 		.4byte	.LCFI5-.LFB8
+ 629 0048 0E          		.1byte	0xe
+ 630 0049 02          		.1byte	0x2
+ 631 0049 83          		.1byte	0x83
+ 632 004a 01          		.1byte	0x1
+ 633 004a 00 00 00    		.p2align	2
+ 634                 	.LEFDE12:
+ 635                 	.LSFDE14:
+ 636 004c 00 00 00 00 		.4byte	.LEFDE14-.LASFDE14
+ 637                 	.LASFDE14:
+ 638 004e 00 00 00 00 		.4byte	.Lframe0
+ 639 0050 00 00 00 00 		.4byte	.LFB9
+ 640 0052 00 00 00 00 		.4byte	.LFE9-.LFB9
+ 641 0054 41          		.p2align	2
+ 642                 	.LEFDE14:
+ 643 0054 0E          	.LSFDE16:
+ 644 0055 02          		.4byte	.LEFDE16-.LASFDE16
+ 645 0055 83          	.LASFDE16:
+ 646 0056 01          		.4byte	.Lframe0
+ 647 0056 00 00 00    		.4byte	.LFB10
+ 648                 		.4byte	.LFE10-.LFB10
+ 649                 		.1byte	0x4
+ 650 0058 00 00 00 00 		.4byte	.LCFI6-.LFB10
+ 651                 		.1byte	0xe
+ 652 005a 00 00 00 00 		.1byte	0x4
+ 653 005c 00 00 00 00 		.1byte	0x83
+ 654 005e 00 00 00 00 		.1byte	0x1
+ 655                 		.p2align	2
+ 656                 	.LEFDE16:
+ 657                 	.LSFDE18:
+ 658 0060 00 00 00 00 		.4byte	.LEFDE18-.LASFDE18
+ 659                 	.LASFDE18:
+ 660 0062 00 00 00 00 		.4byte	.Lframe0
+ 661 0064 00 00 00 00 		.4byte	.LFB11
+ 662 0066 00 00 00 00 		.4byte	.LFE11-.LFB11
+ 663 0068 41          		.1byte	0x4
+ 664                 		.4byte	.LCFI7-.LFB11
+ 665 0068 0E          		.1byte	0xe
+ 666 0069 04          		.1byte	0x3
+ 667 0069 83          		.1byte	0x83
+ 668 006a 01          		.1byte	0x1
+ 669 006a 00 00 00    		.p2align	2
+ 670                 	.LEFDE18:
+ 671                 	.LSFDE20:
+ 672 006c 00 00 00 00 		.4byte	.LEFDE20-.LASFDE20
+ 673                 	.LASFDE20:
+ 674 006e 00 00 00 00 		.4byte	.Lframe0
+ 675 0070 00 00 00 00 		.4byte	.LFB12
+ 676 0072 00 00 00 00 		.4byte	.LFE12-.LFB12
+ 677 0074 41          		.p2align	2
+ 678                 	.LEFDE20:
+ 679 0074 0E          		.text
+ 680 0075 03          	.Letext0:
+ 681 0075 83          		.section	.debug_loc,"",@progbits
+ 682 0076 01          	.Ldebug_loc0:
+ 683 0076 00 00 00    	.LLST0:
+ 684                 		.4byte	.LFB2
+ 685                 		.4byte	.LCFI0
+ 686 0078 00 00 00 00 		.2byte	0x1
+ 687                 		.1byte	0x55
+ 688 007a 00 00 00 00 		.4byte	.LCFI0
+ 689 007c 00 00 00 00 		.4byte	.LFE2
+ 690 007e 00 00 00 00 		.2byte	0x2
+ 691                 		.1byte	0x75
+ 692                 		.1byte	0x7
+ 693                 		.4byte	0x0
+ 694                 		.4byte	0x0
+ 695                 	.LLST1:
+ 696                 		.4byte	.LFB3
+ 697                 		.4byte	.LCFI1
+ 698 0000 00 00 00 00 		.2byte	0x1
+ 699 0002 00 00 00 00 		.1byte	0x55
+ 700 0004 00 01       		.4byte	.LCFI1
+ 701 0005 55          		.4byte	.LFE3
+ 702 0005 00 00 00 00 		.2byte	0x2
+ 703 0007 00 00 00 00 		.1byte	0x75
+ 704 0009 00 02       		.1byte	0x9
+ 705 000a 75          		.4byte	0x0
+ 706 000b 07          		.4byte	0x0
+ 707 000b 00 00 00 00 	.LLST2:
+ 708 000d 00 00 00 00 		.4byte	.LFB4
+ 709                 		.4byte	.LCFI2
+ 710 000f 00 00 00 00 		.2byte	0x1
+ 711 0011 00 00 00 00 		.1byte	0x55
+ 712 0013 00 01       		.4byte	.LCFI2
+ 713 0014 55          		.4byte	.LFE4
+ 714 0015 00 00 00 00 		.2byte	0x2
+ 715 0017 00 00 00 00 		.1byte	0x75
+ 716 0019 00 02       		.1byte	0x5
+ 717 001a 75          		.4byte	0x0
+ 718 001a 09          		.4byte	0x0
+ 719 001b 00 00 00 00 	.LLST3:
+ 720 001d 00 00 00 00 		.4byte	.LFB5
+ 721                 		.4byte	.LCFI3
+ 722 001f 00 00 00 00 		.2byte	0x1
+ 723 0021 00 00 00 00 		.1byte	0x55
+ 724 0023 00 01       		.4byte	.LCFI3
+ 725 0024 55          		.4byte	.LFE5
+ 726 0024 00 00 00 00 		.2byte	0x2
+ 727 0026 00 00 00 00 		.1byte	0x75
+ 728 0028 00 02       		.1byte	0x3
+ 729 0029 75          		.4byte	0x0
+ 730 002a 05          		.4byte	0x0
+ 731 002a 00 00 00 00 	.LLST5:
+ 732 002c 00 00 00 00 		.4byte	.LFB7
+ 733                 		.4byte	.LCFI4
+ 734 002e 00 00 00 00 		.2byte	0x1
+ 735 0030 00 00 00 00 		.1byte	0x55
+ 736 0032 00 01       		.4byte	.LCFI4
+ 737 0033 55          		.4byte	.LFE7
+ 738 0034 00 00 00 00 		.2byte	0x2
+ 739 0036 00 00 00 00 		.1byte	0x75
+ 740 0038 00 02       		.1byte	0x2
+ 741 0039 75          		.4byte	0x0
+ 742 0039 03          		.4byte	0x0
+ 743 003a 00 00 00 00 	.LLST6:
+ 744 003c 00 00 00 00 		.4byte	.LFB8
+ 745                 		.4byte	.LCFI5
+ 746 003e 00 00 00 00 		.2byte	0x1
+ 747 0040 00 00 00 00 		.1byte	0x55
+ 748 0042 00 01       		.4byte	.LCFI5
+ 749 0043 55          		.4byte	.LFE8
+ 750 0043 00 00 00 00 		.2byte	0x2
+ 751 0045 00 00 00 00 		.1byte	0x75
+ 752 0047 00 02       		.1byte	0x2
+ 753 0048 75          		.4byte	0x0
+ 754 0049 02          		.4byte	0x0
+ 755 0049 00 00 00 00 	.LLST8:
+ 756 004b 00 00 00 00 		.4byte	.LFB10
+ 757                 		.4byte	.LCFI6
+ 758 004d 00 00 00 00 		.2byte	0x1
+ 759 004f 00 00 00 00 		.1byte	0x55
+ 760 0051 00 01       		.4byte	.LCFI6
+ 761 0052 55          		.4byte	.LFE10
+ 762 0053 00 00 00 00 		.2byte	0x2
+ 763 0055 00 00 00 00 		.1byte	0x75
+ 764 0057 00 02       		.1byte	0x4
+ 765 0058 75          		.4byte	0x0
+ 766 0058 02          		.4byte	0x0
+ 767 0059 00 00 00 00 	.LLST9:
+ 768 005b 00 00 00 00 		.4byte	.LFB11
+ 769                 		.4byte	.LCFI7
+ 770 005d 00 00 00 00 		.2byte	0x1
+ 771 005f 00 00 00 00 		.1byte	0x55
+ 772 0061 00 01       		.4byte	.LCFI7
+ 773 0062 55          		.4byte	.LFE11
+ 774 0062 00 00 00 00 		.2byte	0x2
+ 775 0064 00 00 00 00 		.1byte	0x75
+ 776 0066 00 02       		.1byte	0x3
+ 777 0067 75          		.4byte	0x0
+ 778 0068 04          		.4byte	0x0
+ 779 0068 00 00 00 00 		.file 2 "C:/CSR_uEnergy_SDK-2.4.5.13/tools/include/CSR101x_A05/types.h"
+ 780 006a 00 00 00 00 		.section	.debug_info
+ 781                 		.4byte	0x30d
+ 782 006c 00 00 00 00 		.2byte	0x2
+ 783 006e 00 00 00 00 		.4byte	.Ldebug_abbrev0
+ 784 0070 00 01       		.1byte	0x4
+ 785 0071 55          		.1byte	0x1
+ 786 0072 00 00 00 00 		.4byte	.LASF26
+ 787 0074 00 00 00 00 		.1byte	0x1
+ 788 0076 00 02       		.4byte	.LASF27
+ 789 0077 75          		.4byte	.LASF28
+ 790 0077 03          		.4byte	0x0
+ 791 0078 00 00 00 00 		.4byte	0x0
+ 792 007a 00 00 00 00 		.4byte	.Ldebug_ranges0+0x0
+ 793                 		.4byte	.Ldebug_line0
+ 794                 		.1byte	0x2
+ 795 0000 00 00 03 0D 		.4byte	.LASF0
+ 796 0002 00 02       		.1byte	0x2
+ 797 0003 00 00 00 00 		.1byte	0x1e
+ 798 0005 04          		.4byte	0x34
+ 799 0005 01          		.1byte	0x3
+ 800 0006 00 00 00 00 		.1byte	0x2
+ 801 0008 01          		.1byte	0x8
+ 802 0008 00 00 00 00 		.4byte	.LASF2
+ 803 000a 00 00 00 00 		.1byte	0x2
+ 804 000c 00 00 00 00 		.4byte	.LASF1
+ 805 000e 00 00 00 00 		.1byte	0x2
+ 806 0010 00 00 00 00 		.1byte	0x1f
+ 807 0012 00 00 00 00 		.4byte	0x46
+ 808 0014 02          		.1byte	0x3
+ 809 0015 00 00 00 00 		.1byte	0x2
+ 810 0017 02          		.1byte	0x7
+ 811 0017 1E          		.4byte	.LASF3
+ 812 0018 00 00 00 34 		.1byte	0x3
+ 813 001a 03          		.1byte	0x4
+ 814 001a 02          		.1byte	0x7
+ 815 001b 08          		.4byte	.LASF4
+ 816 001b 00 00 00 00 		.1byte	0x3
+ 817 001d 02          		.1byte	0x2
+ 818 001e 00 00 00 00 		.1byte	0x6
+ 819 0020 02          		.4byte	.LASF5
+ 820 0020 1F          		.1byte	0x3
+ 821 0021 00 00 00 46 		.1byte	0x2
+ 822 0023 03          		.1byte	0x5
+ 823 0023 02          		.4byte	.LASF6
+ 824 0024 07          		.1byte	0x3
+ 825 0024 00 00 00 00 		.1byte	0x4
+ 826 0026 03          		.1byte	0x5
+ 827 0027 04          		.4byte	.LASF7
+ 828 0027 07          		.1byte	0x2
+ 829 0028 00 00 00 00 		.4byte	.LASF8
+ 830 002a 03          		.1byte	0x2
+ 831 002a 02          		.1byte	0x2a
+ 832 002b 06          		.4byte	0x74
+ 833 002b 00 00 00 00 		.1byte	0x3
+ 834 002d 03          		.1byte	0x2
+ 835 002e 02          		.1byte	0x7
+ 836 002e 05          		.4byte	.LASF9
+ 837 002f 00 00 00 00 		.1byte	0x4
+ 838 0031 03          		.4byte	.LASF29
+ 839 0031 04          		.1byte	0x1
+ 840 0032 05          		.1byte	0x5e
+ 841 0032 00 00 00 00 		.1byte	0x1
+ 842 0034 02          		.4byte	.LFB2
+ 843 0035 00 00 00 00 		.4byte	.LFE2
+ 844 0037 02          		.4byte	.LLST0
+ 845 0037 2A          		.4byte	0xc8
+ 846 0038 00 00 00 74 		.1byte	0x5
+ 847 003a 03          		.4byte	.LASF10
+ 848 003a 02          		.1byte	0x1
+ 849 003b 07          		.1byte	0x5d
+ 850 003b 00 00 00 00 		.4byte	0xc8
+ 851 003d 04          		.1byte	0x2
+ 852 003e 00 00 00 00 		.1byte	0x76
+ 853 0040 01          		.1byte	0x2
+ 854 0040 5E          		.1byte	0x6
+ 855 0041 01          		.ascii "len\000"
+ 856 0041 00 00 00 00 		.1byte	0x1
+ 857 0043 00 00 00 00 		.1byte	0x5d
+ 858 0045 00 00 00 00 		.4byte	0x3b
+ 859 0047 00 00 00 C8 		.1byte	0x2
+ 860 0049 05          		.1byte	0x76
+ 861 004a 00 00 00 00 		.1byte	0x3
+ 862 004c 01          		.1byte	0x7
+ 863 004c 5D          		.4byte	.LBB2
+ 864 004d 00 00 00 C8 		.4byte	.LBE2
+ 865 004f 02          		.1byte	0x8
+ 866 004f 76          		.4byte	.LASF11
+ 867 0050 02          		.1byte	0x1
+ 868 0050 06          		.1byte	0x7f
+ 869 0051 6C 65 6E 00 		.4byte	0xd3
+ 870 0053 01          		.1byte	0x2
+ 871 0053 5D          		.1byte	0x76
+ 872 0054 00 00 00 3B 		.1byte	0x1
+ 873 0056 02          		.1byte	0x0
+ 874 0056 76          		.1byte	0x0
+ 875 0057 03          		.1byte	0x9
+ 876 0057 07          		.1byte	0x2
+ 877 0058 00 00 00 00 		.4byte	0xce
+ 878 005a 00 00 00 00 		.1byte	0xa
+ 879 005c 08          		.4byte	0x29
+ 880 005c 00 00 00 00 		.1byte	0xa
+ 881 005e 01          		.4byte	0x3b
+ 882 005f 7F          		.1byte	0xb
+ 883 005f 00 00 00 D3 		.4byte	.LASF30
+ 884 0061 02          		.1byte	0x1
+ 885 0062 76          		.1byte	0xa5
+ 886 0062 01          		.1byte	0x1
+ 887 0063 00          		.4byte	0x3b
+ 888 0063 00          		.4byte	.LFB3
+ 889 0064 09          		.4byte	.LFE3
+ 890 0064 02          		.4byte	.LLST1
+ 891 0065 00 00 00 CE 		.4byte	0x137
+ 892 0067 0A          		.1byte	0x5
+ 893 0067 00 00 00 29 		.4byte	.LASF10
+ 894 0069 0A          		.1byte	0x1
+ 895 006a 00 00 00 3B 		.1byte	0xa4
+ 896 006c 0B          		.4byte	0x137
+ 897 006c 00 00 00 00 		.1byte	0x2
+ 898 006e 01          		.1byte	0x76
+ 899 006f A5          		.1byte	0x3
+ 900 006f 01          		.1byte	0x6
+ 901 0070 00 00 00 3B 		.ascii "len\000"
+ 902 0072 00 00 00 00 		.1byte	0x1
+ 903 0074 00 00 00 00 		.1byte	0xa4
+ 904 0076 00 00 00 00 		.4byte	0x3b
+ 905 0078 00 00 01 37 		.1byte	0x2
+ 906 007a 05          		.1byte	0x76
+ 907 007a 00 00 00 00 		.1byte	0x4
+ 908 007c 01          		.1byte	0x8
+ 909 007d A4          		.4byte	.LASF12
+ 910 007d 00 00 01 37 		.1byte	0x1
+ 911 007f 02          		.1byte	0xa6
+ 912 0080 76          		.4byte	0x3b
+ 913 0080 03          		.1byte	0x2
+ 914 0081 06          		.1byte	0x76
+ 915 0081 6C 65 6E 00 		.1byte	0x2
+ 916 0083 01          		.1byte	0x7
+ 917 0084 A4          		.4byte	.LBB3
+ 918 0084 00 00 00 3B 		.4byte	.LBE3
+ 919 0086 02          		.1byte	0x8
+ 920 0087 76          		.4byte	.LASF11
+ 921 0087 04          		.1byte	0x1
+ 922 0088 08          		.1byte	0xb4
+ 923 0088 00 00 00 00 		.4byte	0xd3
+ 924 008a 01          		.1byte	0x2
+ 925 008b A6          		.1byte	0x76
+ 926 008b 00 00 00 3B 		.1byte	0x1
+ 927 008d 02          		.1byte	0x0
+ 928 008e 76          		.1byte	0x0
+ 929 008e 02          		.1byte	0x9
+ 930 008f 07          		.1byte	0x2
+ 931 008f 00 00 00 00 		.4byte	0x29
+ 932 0091 00 00 00 00 		.1byte	0xc
+ 933 0093 08          		.1byte	0x1
+ 934 0094 00 00 00 00 		.4byte	.LASF17
+ 935 0096 01          		.1byte	0x1
+ 936 0096 B4          		.1byte	0xe0
+ 937 0097 00 00 00 D3 		.1byte	0x1
+ 938 0099 02          		.4byte	0x69
+ 939 0099 76          		.4byte	.LFB4
+ 940 009a 01          		.4byte	.LFE4
+ 941 009a 00          		.4byte	.LLST2
+ 942 009b 00          		.4byte	0x185
+ 943 009b 09          		.1byte	0x5
+ 944 009c 02          		.4byte	.LASF10
+ 945 009c 00 00 00 29 		.1byte	0x1
+ 946 009e 0C          		.1byte	0xdf
+ 947 009f 01          		.4byte	0xc8
+ 948 009f 00 00 00 00 		.1byte	0x2
+ 949 00a1 01          		.1byte	0x76
+ 950 00a2 E0          		.1byte	0x1
+ 951 00a2 01          		.1byte	0x6
+ 952 00a3 00 00 00 69 		.ascii "len\000"
+ 953 00a5 00 00 00 00 		.1byte	0x1
+ 954 00a7 00 00 00 00 		.1byte	0xdf
+ 955 00a9 00 00 00 00 		.4byte	0x3b
+ 956 00ab 00 00 01 85 		.1byte	0x2
+ 957 00ad 05          		.1byte	0x76
+ 958 00ad 00 00 00 00 		.1byte	0x2
+ 959 00af 01          		.1byte	0x8
+ 960 00b0 DF          		.4byte	.LASF13
+ 961 00b0 00 00 00 C8 		.1byte	0x1
+ 962 00b2 02          		.1byte	0xe2
+ 963 00b3 76          		.4byte	0x69
+ 964 00b3 01          		.1byte	0x2
+ 965 00b4 06          		.1byte	0x76
+ 966 00b4 6C 65 6E 00 		.1byte	0x0
+ 967 00b6 01          		.1byte	0x0
+ 968 00b7 DF          		.1byte	0xd
+ 969 00b7 00 00 00 3B 		.1byte	0x1
+ 970 00b9 02          		.4byte	.LASF31
+ 971 00ba 76          		.1byte	0x1
+ 972 00ba 02          		.1byte	0xfc
+ 973 00bb 08          		.1byte	0x1
+ 974 00bb 00 00 00 00 		.4byte	.LFB5
+ 975 00bd 01          		.4byte	.LFE5
+ 976 00be E2          		.4byte	.LLST3
+ 977 00be 00 00 00 69 		.4byte	0x1bb
+ 978 00c0 02          		.1byte	0x5
+ 979 00c1 76          		.4byte	.LASF10
+ 980 00c1 00          		.1byte	0x1
+ 981 00c2 00          		.1byte	0xfb
+ 982 00c2 0D          		.4byte	0xc8
+ 983 00c3 01          		.1byte	0x2
+ 984 00c3 00 00 00 00 		.1byte	0x76
+ 985 00c5 01          		.1byte	0x0
+ 986 00c6 FC          		.1byte	0x6
+ 987 00c6 01          		.ascii "len\000"
+ 988 00c7 00 00 00 00 		.1byte	0x1
+ 989 00c9 00 00 00 00 		.1byte	0xfb
+ 990 00cb 00 00 00 00 		.4byte	0x3b
+ 991 00cd 00 00 01 BB 		.1byte	0x2
+ 992 00cf 05          		.1byte	0x76
+ 993 00cf 00 00 00 00 		.1byte	0x1
+ 994 00d1 01          		.1byte	0x0
+ 995 00d2 FB          		.1byte	0xe
+ 996 00d2 00 00 00 C8 		.1byte	0x1
+ 997 00d4 02          		.4byte	.LASF14
+ 998 00d5 76          		.1byte	0x1
+ 999 00d5 00          		.2byte	0x10f
+ 1000 00d6 06          		.1byte	0x1
+ 1001 00d6 6C 65 6E 00 		.4byte	0x3b
+ 1002 00d8 01          		.4byte	.LFB6
+ 1003 00d9 FB          		.4byte	.LFE6
+ 1004 00d9 00 00 00 3B 		.1byte	0x1
+ 1005 00db 02          		.1byte	0x55
+ 1006 00dc 76          		.1byte	0xf
+ 1007 00dc 01          		.1byte	0x1
+ 1008 00dd 00          		.4byte	.LASF15
+ 1009 00dd 0E          		.1byte	0x1
+ 1010 00de 01          		.2byte	0x121
+ 1011 00de 00 00 00 00 		.1byte	0x1
+ 1012 00e0 01          		.4byte	0x3b
+ 1013 00e1 01 0F       		.4byte	.LFB7
+ 1014 00e2 01          		.4byte	.LFE7
+ 1015 00e2 00 00 00 3B 		.4byte	.LLST5
+ 1016 00e4 00 00 00 00 		.1byte	0xf
+ 1017 00e6 00 00 00 00 		.1byte	0x1
+ 1018 00e8 01          		.4byte	.LASF16
+ 1019 00e9 55          		.1byte	0x1
+ 1020 00e9 0F          		.2byte	0x133
+ 1021 00ea 01          		.1byte	0x1
+ 1022 00ea 00 00 00 00 		.4byte	0x3b
+ 1023 00ec 01          		.4byte	.LFB8
+ 1024 00ed 01 21       		.4byte	.LFE8
+ 1025 00ee 01          		.4byte	.LLST6
+ 1026 00ee 00 00 00 3B 		.1byte	0x10
+ 1027 00f0 00 00 00 00 		.1byte	0x1
+ 1028 00f2 00 00 00 00 		.4byte	.LASF20
+ 1029 00f4 00 00 00 00 		.1byte	0x1
+ 1030 00f6 0F          		.2byte	0x145
+ 1031 00f7 01          		.1byte	0x1
+ 1032 00f7 00 00 00 00 		.4byte	.LFB9
+ 1033 00f9 01          		.4byte	.LFE9
+ 1034 00fa 01 33       		.1byte	0x1
+ 1035 00fb 01          		.1byte	0x55
+ 1036 00fb 00 00 00 3B 		.1byte	0x11
+ 1037 00fd 00 00 00 00 		.1byte	0x1
+ 1038 00ff 00 00 00 00 		.4byte	.LASF18
+ 1039 0101 00 00 00 00 		.1byte	0x1
+ 1040 0103 10          		.2byte	0x15d
+ 1041 0104 01          		.1byte	0x1
+ 1042 0104 00 00 00 00 		.4byte	0x3b
+ 1043 0106 01          		.4byte	.LFB10
+ 1044 0107 01 45       		.4byte	.LFE10
+ 1045 0108 01          		.4byte	.LLST8
+ 1046 0108 00 00 00 00 		.4byte	0x267
+ 1047 010a 00 00 00 00 		.1byte	0x12
+ 1048 010c 01          		.4byte	.LASF10
+ 1049 010d 55          		.1byte	0x1
+ 1050 010d 11          		.2byte	0x15c
+ 1051 010e 01          		.4byte	0x137
+ 1052 010e 00 00 00 00 		.1byte	0x2
+ 1053 0110 01          		.1byte	0x76
+ 1054 0111 01 5D       		.1byte	0x1
+ 1055 0112 01          		.1byte	0x13
+ 1056 0112 00 00 00 3B 		.ascii "len\000"
+ 1057 0114 00 00 00 00 		.1byte	0x1
+ 1058 0116 00 00 00 00 		.2byte	0x15c
+ 1059 0118 00 00 00 00 		.4byte	0x3b
+ 1060 011a 00 00 02 67 		.1byte	0x2
+ 1061 011c 12          		.1byte	0x76
+ 1062 011d 00 00 00 00 		.1byte	0x2
+ 1063 011f 01          		.1byte	0x14
+ 1064 011f 01 5C       		.4byte	.LASF12
+ 1065 0120 00 00 01 37 		.1byte	0x1
+ 1066 0122 02          		.2byte	0x15f
+ 1067 0123 76          		.4byte	0x3b
+ 1068 0123 01          		.1byte	0x2
+ 1069 0124 13          		.1byte	0x76
+ 1070 0124 6C 65 6E 00 		.1byte	0x0
+ 1071 0126 01          		.1byte	0x0
+ 1072 0127 01 5C       		.1byte	0x11
+ 1073 0128 00 00 00 3B 		.1byte	0x1
+ 1074 012a 02          		.4byte	.LASF19
+ 1075 012a 76          		.1byte	0x1
+ 1076 012b 02          		.2byte	0x17a
+ 1077 012b 14          		.1byte	0x1
+ 1078 012c 00 00 00 00 		.4byte	0x3b
+ 1079 012e 01          		.4byte	.LFB11
+ 1080 012e 01 5F       		.4byte	.LFE11
+ 1081 012f 00 00 00 3B 		.4byte	.LLST9
+ 1082 0131 02          		.4byte	0x2a4
+ 1083 0132 76          		.1byte	0x12
+ 1084 0132 00          		.4byte	.LASF10
+ 1085 0133 00          		.1byte	0x1
+ 1086 0133 11          		.2byte	0x179
+ 1087 0134 01          		.4byte	0x137
+ 1088 0134 00 00 00 00 		.1byte	0x2
+ 1089 0136 01          		.1byte	0x76
+ 1090 0137 01 7A       		.1byte	0x0
+ 1091 0138 01          		.1byte	0x13
+ 1092 0138 00 00 00 3B 		.ascii "len\000"
+ 1093 013a 00 00 00 00 		.1byte	0x1
+ 1094 013c 00 00 00 00 		.2byte	0x179
+ 1095 013e 00 00 00 00 		.4byte	0x3b
+ 1096 0140 00 00 02 A4 		.1byte	0x2
+ 1097 0142 12          		.1byte	0x76
+ 1098 0143 00 00 00 00 		.1byte	0x1
+ 1099 0145 01          		.1byte	0x0
+ 1100 0145 01 79       		.1byte	0x10
+ 1101 0146 00 00 01 37 		.1byte	0x1
+ 1102 0148 02          		.4byte	.LASF21
+ 1103 0149 76          		.1byte	0x1
+ 1104 0149 00          		.2byte	0x18e
+ 1105 014a 13          		.1byte	0x1
+ 1106 014a 6C 65 6E 00 		.4byte	.LFB12
+ 1107 014c 01          		.4byte	.LFE12
+ 1108 014d 01 79       		.1byte	0x1
+ 1109 014e 00 00 00 3B 		.1byte	0x55
+ 1110 0150 02          		.1byte	0x15
+ 1111 0150 76          		.4byte	0x29
+ 1112 0151 01          		.4byte	0x2c9
+ 1113 0151 00          		.1byte	0x16
+ 1114 0152 10          		.4byte	0x2c9
+ 1115 0152 01          		.2byte	0x3ff
+ 1116 0153 00 00 00 00 		.1byte	0x0
+ 1117 0155 01          		.1byte	0x17
+ 1118 0155 01 8E       		.1byte	0x2
+ 1119 0156 01          		.1byte	0x7
+ 1120 0157 00 00 00 00 		.1byte	0x8
+ 1121 0159 00 00 00 00 		.4byte	.LASF22
+ 1122 015b 01          		.1byte	0x1
+ 1123 015b 55          		.1byte	0x31
+ 1124 015c 15          		.4byte	0x2b8
+ 1125 015c 00 00 00 29 		.1byte	0x5
+ 1126 015e 00 00 02 C9 		.1byte	0x3
+ 1127 0160 16          		.4byte	g_queue
+ 1128 0161 00 00 02 C9 		.1byte	0x8
+ 1129 0163 03 FF       		.4byte	.LASF23
+ 1130 0164 00          		.1byte	0x1
+ 1131 0164 17          		.1byte	0x34
+ 1132 0165 02          		.4byte	0x3b
+ 1133 0165 07          		.1byte	0x5
+ 1134 0166 08          		.1byte	0x3
+ 1135 0166 00 00 00 00 		.4byte	g_head
+ 1136 0168 01          		.1byte	0x8
+ 1137 0169 31          		.4byte	.LASF24
+ 1138 0169 00 00 02 B8 		.1byte	0x1
+ 1139 016b 05          		.1byte	0x37
+ 1140 016c 03          		.4byte	0x3b
+ 1141 016c 00 00 00 00 		.1byte	0x5
+ 1142 016e 08          		.1byte	0x3
+ 1143 016f 00 00 00 00 		.4byte	g_peek
+ 1144 0171 01          		.1byte	0x8
+ 1145 0171 34          		.4byte	.LASF25
+ 1146 0172 00 00 00 3B 		.1byte	0x1
+ 1147 0174 05          		.1byte	0x3a
+ 1148 0174 03          		.4byte	0x3b
+ 1149 0175 00 00 00 00 		.1byte	0x5
+ 1150 0177 08          		.1byte	0x3
+ 1151 0177 00 00 00 00 		.4byte	g_tail
+ 1152 0179 01          		.1byte	0x0
+ 1153 017a 37          		.section	.debug_abbrev
+ 1154 017a 00 00 00 3B 		.1byte	0x1
+ 1155 017c 05          		.1byte	0x11
+ 1156 017d 03          		.1byte	0x1
+ 1157 017d 00 00 00 00 		.1byte	0x25
+ 1158 017f 08          		.1byte	0xe
+ 1159 0180 00 00 00 00 		.1byte	0x13
+ 1160 0182 01          		.1byte	0xb
+ 1161 0182 3A          		.1byte	0x3
+ 1162 0183 00 00 00 3B 		.1byte	0xe
+ 1163 0185 05          		.1byte	0x1b
+ 1164 0185 03          		.1byte	0xe
+ 1165 0186 00 00 00 00 		.1byte	0x11
+ 1166 0188 00          		.1byte	0x1
+ 1167                 		.1byte	0x52
+ 1168 0000 01          		.1byte	0x1
+ 1169 0000 11          		.1byte	0x55
+ 1170 0001 01          		.1byte	0x6
+ 1171 0001 25          		.1byte	0x10
+ 1172 0002 0E          		.1byte	0x6
+ 1173 0002 13          		.1byte	0x0
+ 1174 0003 0B          		.1byte	0x0
+ 1175 0003 03          		.1byte	0x2
+ 1176 0004 0E          		.1byte	0x16
+ 1177 0004 1B          		.1byte	0x0
+ 1178 0005 0E          		.1byte	0x3
+ 1179 0005 11          		.1byte	0xe
+ 1180 0006 01          		.1byte	0x3a
+ 1181 0006 52          		.1byte	0xb
+ 1182 0007 01          		.1byte	0x3b
+ 1183 0007 55          		.1byte	0xb
+ 1184 0008 06          		.1byte	0x49
+ 1185 0008 10          		.1byte	0x13
+ 1186 0009 06          		.1byte	0x0
+ 1187 0009 00          		.1byte	0x0
+ 1188 000a 00          		.1byte	0x3
+ 1189 000a 02          		.1byte	0x24
+ 1190 000b 16          		.1byte	0x0
+ 1191 000b 00          		.1byte	0xb
+ 1192 000c 03          		.1byte	0xb
+ 1193 000c 0E          		.1byte	0x3e
+ 1194 000d 3A          		.1byte	0xb
+ 1195 000d 0B          		.1byte	0x3
+ 1196 000e 3B          		.1byte	0xe
+ 1197 000e 0B          		.1byte	0x0
+ 1198 000f 49          		.1byte	0x0
+ 1199 000f 13          		.1byte	0x4
+ 1200 0010 00          		.1byte	0x2e
+ 1201 0010 00          		.1byte	0x1
+ 1202 0011 03          		.1byte	0x3
+ 1203 0011 24          		.1byte	0xe
+ 1204 0012 00          		.1byte	0x3a
+ 1205 0012 0B          		.1byte	0xb
+ 1206 0013 0B          		.1byte	0x3b
+ 1207 0013 3E          		.1byte	0xb
+ 1208 0014 0B          		.1byte	0x27
+ 1209 0014 03          		.1byte	0xc
+ 1210 0015 0E          		.1byte	0x11
+ 1211 0015 00          		.1byte	0x1
+ 1212 0016 00          		.1byte	0x12
+ 1213 0016 04          		.1byte	0x1
+ 1214 0017 2E          		.1byte	0x40
+ 1215 0017 01          		.1byte	0x6
+ 1216 0018 03          		.1byte	0x1
+ 1217 0018 0E          		.1byte	0x13
+ 1218 0019 3A          		.1byte	0x0
+ 1219 0019 0B          		.1byte	0x0
+ 1220 001a 3B          		.1byte	0x5
+ 1221 001a 0B          		.1byte	0x5
+ 1222 001b 27          		.1byte	0x0
+ 1223 001b 0C          		.1byte	0x3
+ 1224 001c 11          		.1byte	0xe
+ 1225 001c 01          		.1byte	0x3a
+ 1226 001d 12          		.1byte	0xb
+ 1227 001d 01          		.1byte	0x3b
+ 1228 001e 40          		.1byte	0xb
+ 1229 001e 06          		.1byte	0x49
+ 1230 001f 01          		.1byte	0x13
+ 1231 001f 13          		.1byte	0x2
+ 1232 0020 00          		.1byte	0xa
+ 1233 0020 00          		.1byte	0x0
+ 1234 0021 05          		.1byte	0x0
+ 1235 0021 05          		.1byte	0x6
+ 1236 0022 00          		.1byte	0x5
+ 1237 0022 03          		.1byte	0x0
+ 1238 0023 0E          		.1byte	0x3
+ 1239 0023 3A          		.1byte	0x8
+ 1240 0024 0B          		.1byte	0x3a
+ 1241 0024 3B          		.1byte	0xb
+ 1242 0025 0B          		.1byte	0x3b
+ 1243 0025 49          		.1byte	0xb
+ 1244 0026 13          		.1byte	0x49
+ 1245 0026 02          		.1byte	0x13
+ 1246 0027 0A          		.1byte	0x2
+ 1247 0027 00          		.1byte	0xa
+ 1248 0028 00          		.1byte	0x0
+ 1249 0028 06          		.1byte	0x0
+ 1250 0029 05          		.1byte	0x7
+ 1251 0029 00          		.1byte	0xb
+ 1252 002a 03          		.1byte	0x1
+ 1253 002a 08          		.1byte	0x11
+ 1254 002b 3A          		.1byte	0x1
+ 1255 002b 0B          		.1byte	0x12
+ 1256 002c 3B          		.1byte	0x1
+ 1257 002c 0B          		.1byte	0x0
+ 1258 002d 49          		.1byte	0x0
+ 1259 002d 13          		.1byte	0x8
+ 1260 002e 02          		.1byte	0x34
+ 1261 002e 0A          		.1byte	0x0
+ 1262 002f 00          		.1byte	0x3
+ 1263 002f 00          		.1byte	0xe
+ 1264 0030 07          		.1byte	0x3a
+ 1265 0030 0B          		.1byte	0xb
+ 1266 0031 01          		.1byte	0x3b
+ 1267 0031 11          		.1byte	0xb
+ 1268 0032 01          		.1byte	0x49
+ 1269 0032 12          		.1byte	0x13
+ 1270 0033 01          		.1byte	0x2
+ 1271 0033 00          		.1byte	0xa
+ 1272 0034 00          		.1byte	0x0
+ 1273 0034 08          		.1byte	0x0
+ 1274 0035 34          		.1byte	0x9
+ 1275 0035 00          		.1byte	0xf
+ 1276 0036 03          		.1byte	0x0
+ 1277 0036 0E          		.1byte	0xb
+ 1278 0037 3A          		.1byte	0xb
+ 1279 0037 0B          		.1byte	0x49
+ 1280 0038 3B          		.1byte	0x13
+ 1281 0038 0B          		.1byte	0x0
+ 1282 0039 49          		.1byte	0x0
+ 1283 0039 13          		.1byte	0xa
+ 1284 003a 02          		.1byte	0x26
+ 1285 003a 0A          		.1byte	0x0
+ 1286 003b 00          		.1byte	0x49
+ 1287 003b 00          		.1byte	0x13
+ 1288 003c 09          		.1byte	0x0
+ 1289 003c 0F          		.1byte	0x0
+ 1290 003d 00          		.1byte	0xb
+ 1291 003d 0B          		.1byte	0x2e
+ 1292 003e 0B          		.1byte	0x1
+ 1293 003e 49          		.1byte	0x3
+ 1294 003f 13          		.1byte	0xe
+ 1295 003f 00          		.1byte	0x3a
+ 1296 0040 00          		.1byte	0xb
+ 1297 0040 0A          		.1byte	0x3b
+ 1298 0041 26          		.1byte	0xb
+ 1299 0041 00          		.1byte	0x27
+ 1300 0042 49          		.1byte	0xc
+ 1301 0042 13          		.1byte	0x49
+ 1302 0043 00          		.1byte	0x13
+ 1303 0043 00          		.1byte	0x11
+ 1304 0044 0B          		.1byte	0x1
+ 1305 0044 2E          		.1byte	0x12
+ 1306 0045 01          		.1byte	0x1
+ 1307 0045 03          		.1byte	0x40
+ 1308 0046 0E          		.1byte	0x6
+ 1309 0046 3A          		.1byte	0x1
+ 1310 0047 0B          		.1byte	0x13
+ 1311 0047 3B          		.1byte	0x0
+ 1312 0048 0B          		.1byte	0x0
+ 1313 0048 27          		.1byte	0xc
+ 1314 0049 0C          		.1byte	0x2e
+ 1315 0049 49          		.1byte	0x1
+ 1316 004a 13          		.1byte	0x3f
+ 1317 004a 11          		.1byte	0xc
+ 1318 004b 01          		.1byte	0x3
+ 1319 004b 12          		.1byte	0xe
+ 1320 004c 01          		.1byte	0x3a
+ 1321 004c 40          		.1byte	0xb
+ 1322 004d 06          		.1byte	0x3b
+ 1323 004d 01          		.1byte	0xb
+ 1324 004e 13          		.1byte	0x27
+ 1325 004e 00          		.1byte	0xc
+ 1326 004f 00          		.1byte	0x49
+ 1327 004f 0C          		.1byte	0x13
+ 1328 0050 2E          		.1byte	0x11
+ 1329 0050 01          		.1byte	0x1
+ 1330 0051 3F          		.1byte	0x12
+ 1331 0051 0C          		.1byte	0x1
+ 1332 0052 03          		.1byte	0x40
+ 1333 0052 0E          		.1byte	0x6
+ 1334 0053 3A          		.1byte	0x1
+ 1335 0053 0B          		.1byte	0x13
+ 1336 0054 3B          		.1byte	0x0
+ 1337 0054 0B          		.1byte	0x0
+ 1338 0055 27          		.1byte	0xd
+ 1339 0055 0C          		.1byte	0x2e
+ 1340 0056 49          		.1byte	0x1
+ 1341 0056 13          		.1byte	0x3f
+ 1342 0057 11          		.1byte	0xc
+ 1343 0057 01          		.1byte	0x3
+ 1344 0058 12          		.1byte	0xe
+ 1345 0058 01          		.1byte	0x3a
+ 1346 0059 40          		.1byte	0xb
+ 1347 0059 06          		.1byte	0x3b
+ 1348 005a 01          		.1byte	0xb
+ 1349 005a 13          		.1byte	0x27
+ 1350 005b 00          		.1byte	0xc
+ 1351 005b 00          		.1byte	0x11
+ 1352 005c 0D          		.1byte	0x1
+ 1353 005c 2E          		.1byte	0x12
+ 1354 005d 01          		.1byte	0x1
+ 1355 005d 3F          		.1byte	0x40
+ 1356 005e 0C          		.1byte	0x6
+ 1357 005e 03          		.1byte	0x1
+ 1358 005f 0E          		.1byte	0x13
+ 1359 005f 3A          		.1byte	0x0
+ 1360 0060 0B          		.1byte	0x0
+ 1361 0060 3B          		.1byte	0xe
+ 1362 0061 0B          		.1byte	0x2e
+ 1363 0061 27          		.1byte	0x0
+ 1364 0062 0C          		.1byte	0x3f
+ 1365 0062 11          		.1byte	0xc
+ 1366 0063 01          		.1byte	0x3
+ 1367 0063 12          		.1byte	0xe
+ 1368 0064 01          		.1byte	0x3a
+ 1369 0064 40          		.1byte	0xb
+ 1370 0065 06          		.1byte	0x3b
+ 1371 0065 01          		.1byte	0x5
+ 1372 0066 13          		.1byte	0x27
+ 1373 0066 00          		.1byte	0xc
+ 1374 0067 00          		.1byte	0x49
+ 1375 0067 0E          		.1byte	0x13
+ 1376 0068 2E          		.1byte	0x11
+ 1377 0068 00          		.1byte	0x1
+ 1378 0069 3F          		.1byte	0x12
+ 1379 0069 0C          		.1byte	0x1
+ 1380 006a 03          		.1byte	0x40
+ 1381 006a 0E          		.1byte	0xa
+ 1382 006b 3A          		.1byte	0x0
+ 1383 006b 0B          		.1byte	0x0
+ 1384 006c 3B          		.1byte	0xf
+ 1385 006c 05          		.1byte	0x2e
+ 1386 006d 27          		.1byte	0x0
+ 1387 006d 0C          		.1byte	0x3f
+ 1388 006e 49          		.1byte	0xc
+ 1389 006e 13          		.1byte	0x3
+ 1390 006f 11          		.1byte	0xe
+ 1391 006f 01          		.1byte	0x3a
+ 1392 0070 12          		.1byte	0xb
+ 1393 0070 01          		.1byte	0x3b
+ 1394 0071 40          		.1byte	0x5
+ 1395 0071 0A          		.1byte	0x27
+ 1396 0072 00          		.1byte	0xc
+ 1397 0072 00          		.1byte	0x49
+ 1398 0073 0F          		.1byte	0x13
+ 1399 0073 2E          		.1byte	0x11
+ 1400 0074 00          		.1byte	0x1
+ 1401 0074 3F          		.1byte	0x12
+ 1402 0075 0C          		.1byte	0x1
+ 1403 0075 03          		.1byte	0x40
+ 1404 0076 0E          		.1byte	0x6
+ 1405 0076 3A          		.1byte	0x0
+ 1406 0077 0B          		.1byte	0x0
+ 1407 0077 3B          		.1byte	0x10
+ 1408 0078 05          		.1byte	0x2e
+ 1409 0078 27          		.1byte	0x0
+ 1410 0079 0C          		.1byte	0x3f
+ 1411 0079 49          		.1byte	0xc
+ 1412 007a 13          		.1byte	0x3
+ 1413 007a 11          		.1byte	0xe
+ 1414 007b 01          		.1byte	0x3a
+ 1415 007b 12          		.1byte	0xb
+ 1416 007c 01          		.1byte	0x3b
+ 1417 007c 40          		.1byte	0x5
+ 1418 007d 06          		.1byte	0x27
+ 1419 007d 00          		.1byte	0xc
+ 1420 007e 00          		.1byte	0x11
+ 1421 007e 10          		.1byte	0x1
+ 1422 007f 2E          		.1byte	0x12
+ 1423 007f 00          		.1byte	0x1
+ 1424 0080 3F          		.1byte	0x40
+ 1425 0080 0C          		.1byte	0xa
+ 1426 0081 03          		.1byte	0x0
+ 1427 0081 0E          		.1byte	0x0
+ 1428 0082 3A          		.1byte	0x11
+ 1429 0082 0B          		.1byte	0x2e
+ 1430 0083 3B          		.1byte	0x1
+ 1431 0083 05          		.1byte	0x3f
+ 1432 0084 27          		.1byte	0xc
+ 1433 0084 0C          		.1byte	0x3
+ 1434 0085 11          		.1byte	0xe
+ 1435 0085 01          		.1byte	0x3a
+ 1436 0086 12          		.1byte	0xb
+ 1437 0086 01          		.1byte	0x3b
+ 1438 0087 40          		.1byte	0x5
+ 1439 0087 0A          		.1byte	0x27
+ 1440 0088 00          		.1byte	0xc
+ 1441 0088 00          		.1byte	0x49
+ 1442 0089 11          		.1byte	0x13
+ 1443 0089 2E          		.1byte	0x11
+ 1444 008a 01          		.1byte	0x1
+ 1445 008a 3F          		.1byte	0x12
+ 1446 008b 0C          		.1byte	0x1
+ 1447 008b 03          		.1byte	0x40
+ 1448 008c 0E          		.1byte	0x6
+ 1449 008c 3A          		.1byte	0x1
+ 1450 008d 0B          		.1byte	0x13
+ 1451 008d 3B          		.1byte	0x0
+ 1452 008e 05          		.1byte	0x0
+ 1453 008e 27          		.1byte	0x12
+ 1454 008f 0C          		.1byte	0x5
+ 1455 008f 49          		.1byte	0x0
+ 1456 0090 13          		.1byte	0x3
+ 1457 0090 11          		.1byte	0xe
+ 1458 0091 01          		.1byte	0x3a
+ 1459 0091 12          		.1byte	0xb
+ 1460 0092 01          		.1byte	0x3b
+ 1461 0092 40          		.1byte	0x5
+ 1462 0093 06          		.1byte	0x49
+ 1463 0093 01          		.1byte	0x13
+ 1464 0094 13          		.1byte	0x2
+ 1465 0094 00          		.1byte	0xa
+ 1466 0095 00          		.1byte	0x0
+ 1467 0095 12          		.1byte	0x0
+ 1468 0096 05          		.1byte	0x13
+ 1469 0096 00          		.1byte	0x5
+ 1470 0097 03          		.1byte	0x0
+ 1471 0097 0E          		.1byte	0x3
+ 1472 0098 3A          		.1byte	0x8
+ 1473 0098 0B          		.1byte	0x3a
+ 1474 0099 3B          		.1byte	0xb
+ 1475 0099 05          		.1byte	0x3b
+ 1476 009a 49          		.1byte	0x5
+ 1477 009a 13          		.1byte	0x49
+ 1478 009b 02          		.1byte	0x13
+ 1479 009b 0A          		.1byte	0x2
+ 1480 009c 00          		.1byte	0xa
+ 1481 009c 00          		.1byte	0x0
+ 1482 009d 13          		.1byte	0x0
+ 1483 009d 05          		.1byte	0x14
+ 1484 009e 00          		.1byte	0x34
+ 1485 009e 03          		.1byte	0x0
+ 1486 009f 08          		.1byte	0x3
+ 1487 009f 3A          		.1byte	0xe
+ 1488 00a0 0B          		.1byte	0x3a
+ 1489 00a0 3B          		.1byte	0xb
+ 1490 00a1 05          		.1byte	0x3b
+ 1491 00a1 49          		.1byte	0x5
+ 1492 00a2 13          		.1byte	0x49
+ 1493 00a2 02          		.1byte	0x13
+ 1494 00a3 0A          		.1byte	0x2
+ 1495 00a3 00          		.1byte	0xa
+ 1496 00a4 00          		.1byte	0x0
+ 1497 00a4 14          		.1byte	0x0
+ 1498 00a5 34          		.1byte	0x15
+ 1499 00a5 00          		.1byte	0x1
+ 1500 00a6 03          		.1byte	0x1
+ 1501 00a6 0E          		.1byte	0x49
+ 1502 00a7 3A          		.1byte	0x13
+ 1503 00a7 0B          		.1byte	0x1
+ 1504 00a8 3B          		.1byte	0x13
+ 1505 00a8 05          		.1byte	0x0
+ 1506 00a9 49          		.1byte	0x0
+ 1507 00a9 13          		.1byte	0x16
+ 1508 00aa 02          		.1byte	0x21
+ 1509 00aa 0A          		.1byte	0x0
+ 1510 00ab 00          		.1byte	0x49
+ 1511 00ab 00          		.1byte	0x13
+ 1512 00ac 15          		.1byte	0x2f
+ 1513 00ac 01          		.1byte	0x5
+ 1514 00ad 01          		.1byte	0x0
+ 1515 00ad 49          		.1byte	0x0
+ 1516 00ae 13          		.1byte	0x17
+ 1517 00ae 01          		.1byte	0x24
+ 1518 00af 13          		.1byte	0x0
+ 1519 00af 00          		.1byte	0xb
+ 1520 00b0 00          		.1byte	0xb
+ 1521 00b0 16          		.1byte	0x3e
+ 1522 00b1 21          		.1byte	0xb
+ 1523 00b1 00          		.1byte	0x0
+ 1524 00b2 49          		.1byte	0x0
+ 1525 00b2 13          		.1byte	0x0
+ 1526 00b3 2F          		.section	.debug_pubnames,"",@progbits
+ 1527 00b3 05          		.4byte	0xc0
+ 1528 00b4 00          		.2byte	0x2
+ 1529 00b4 00          		.4byte	.Ldebug_info0
+ 1530 00b5 17          		.4byte	0x311
+ 1531 00b5 24          		.4byte	0x13d
+ 1532 00b6 00          		.ascii "BQSafeQueueBytes\000"
+ 1533 00b6 0B          		.4byte	0x185
+ 1534 00b7 0B          		.ascii "BQForceQueueBytes\000"
+ 1535 00b7 3E          		.4byte	0x1bb
+ 1536 00b8 0B          		.ascii "BQGetBufferCapacity\000"
+ 1537 00b8 00          		.4byte	0x1d3
+ 1538 00b9 00          		.ascii "BQGetDataSize\000"
+ 1539 00b9 00          		.4byte	0x1ed
+ 1540                 		.ascii "BQGetAvailableSize\000"
+ 1541 0000 00 00 00 C0 		.4byte	0x207
+ 1542 0002 00 02       		.ascii "BQClearBuffer\000"
+ 1543 0003 00 00 00 00 		.4byte	0x21b
+ 1544 0005 00 00 03 11 		.ascii "BQPopBytes\000"
+ 1545 0007 00 00 01 3D 		.4byte	0x267
+ 1546 0009 42 51 53 61 		.ascii "BQPeekBytes\000"
+ 1546      66 65 51 75 
+ 1546      65 75 65 42 
+ 1546      79 74 65 73 
+ 1546      00 
+ 1547 0011 00 00 01 85 		.4byte	0x2a4
+ 1548 0013 42 51 46 6F 		.ascii "BQCommitLastPeek\000"
+ 1548      72 63 65 51 
+ 1548      75 65 75 65 
+ 1548      42 79 74 65 
+ 1548      73 00 
+ 1549 001c 00 00 01 BB 		.4byte	0x0
+ 1550 001e 42 51 47 65 		.section	.debug_aranges,"",@progbits
+ 1550      74 42 75 66 
+ 1550      66 65 72 43 
+ 1550      61 70 61 63 
+ 1550      69 74 79 00 
+ 1551 0028 00 00 01 D3 		.4byte	0x6c
+ 1552 002a 42 51 47 65 		.2byte	0x2
+ 1552      74 44 61 74 
+ 1552      61 53 69 7A 
+ 1552      65 00 
+ 1553 0031 00 00 01 ED 		.4byte	.Ldebug_info0
+ 1554 0033 42 51 47 65 		.1byte	0x4
+ 1554      74 41 76 61 
+ 1554      69 6C 61 62 
+ 1554      6C 65 53 69 
+ 1554      7A 65 00 
+ 1555 003d 00 00 02 07 		.1byte	0x0
+ 1556 003f 42 51 43 6C 		.2byte	0x0
+ 1556      65 61 72 42 
+ 1556      75 66 66 65 
+ 1556      72 00 
+ 1557 0046 00 00 02 1B 		.2byte	0x0
+ 1558 0048 42 51 50 6F 		.4byte	.LFB2
+ 1558      70 42 79 74 
+ 1558      65 73 00 
+ 1559 004d 00 00 02 67 		.4byte	.LFE2-.LFB2
+ 1560 004f 42 51 50 65 		.4byte	.LFB3
+ 1560      65 6B 42 79 
+ 1560      74 65 73 00 
+ 1561 0055 00 00 02 A4 		.4byte	.LFE3-.LFB3
+ 1562 0057 42 51 43 6F 		.4byte	.LFB4
+ 1562      6D 6D 69 74 
+ 1562      4C 61 73 74 
+ 1562      50 65 65 6B 
+ 1562      00 
+ 1563 0060 00 00 00 00 		.4byte	.LFE4-.LFB4
+ 1564                 		.4byte	.LFB5
+ 1565 0000 00 00 00 6C 		.4byte	.LFE5-.LFB5
+ 1566 0002 00 02       		.4byte	.LFB6
+ 1567 0003 00 00 00 00 		.4byte	.LFE6-.LFB6
+ 1568 0005 04          		.4byte	.LFB7
+ 1569 0005 00          		.4byte	.LFE7-.LFB7
+ 1570 0006 00 00       		.4byte	.LFB8
+ 1571 0007 00 00       		.4byte	.LFE8-.LFB8
+ 1572 0008 00 00 00 00 		.4byte	.LFB9
+ 1573 000a 00 00 00 00 		.4byte	.LFE9-.LFB9
+ 1574 000c 00 00 00 00 		.4byte	.LFB10
+ 1575 000e 00 00 00 00 		.4byte	.LFE10-.LFB10
+ 1576 0010 00 00 00 00 		.4byte	.LFB11
+ 1577 0012 00 00 00 00 		.4byte	.LFE11-.LFB11
+ 1578 0014 00 00 00 00 		.4byte	.LFB12
+ 1579 0016 00 00 00 00 		.4byte	.LFE12-.LFB12
+ 1580 0018 00 00 00 00 		.4byte	0x0
+ 1581 001a 00 00 00 03 		.4byte	0x0
+ 1582 001c 00 00 00 00 		.section	.debug_ranges,"",@progbits
+ 1583 001e 00 00 00 00 	.Ldebug_ranges0:
+ 1584 0020 00 00 00 00 		.4byte	.Ltext0
+ 1585 0022 00 00 00 00 		.4byte	.Letext0
+ 1586 0024 00 00 00 00 		.4byte	.LFB2
+ 1587 0026 00 00 00 00 		.4byte	.LFE2
+ 1588 0028 00 00 00 00 		.4byte	.LFB3
+ 1589 002a 00 00 00 00 		.4byte	.LFE3
+ 1590 002c 00 00 00 00 		.4byte	.LFB4
+ 1591 002e 00 00 00 00 		.4byte	.LFE4
+ 1592 0030 00 00 00 00 		.4byte	.LFB5
+ 1593 0032 00 00 00 00 		.4byte	.LFE5
+ 1594 0034 00 00 00 00 		.4byte	.LFB6
+ 1595 0036 00 00 00 00 		.4byte	.LFE6
+ 1596                 		.4byte	.LFB7
+ 1597                 		.4byte	.LFE7
+ 1598 0000 00 00 00 00 		.4byte	.LFB8
+ 1599 0002 00 00 00 00 		.4byte	.LFE8
+ 1600 0004 00 00 00 00 		.4byte	.LFB9
+ 1601 0006 00 00 00 00 		.4byte	.LFE9
+ 1602 0008 00 00 00 00 		.4byte	.LFB10
+ 1603 000a 00 00 00 00 		.4byte	.LFE10
+ 1604 000c 00 00 00 00 		.4byte	.LFB11
+ 1605 000e 00 00 00 00 		.4byte	.LFE11
+ 1606 0010 00 00 00 00 		.4byte	.LFB12
+ 1607 0012 00 00 00 00 		.4byte	.LFE12
+ 1608 0014 00 00 00 00 		.4byte	0x0
+ 1609 0016 00 00 00 00 		.4byte	0x0
+ 1610 0018 00 00 00 00 		.section	.debug_str,"MS",@progbits,1
+ 1611 001a 00 00 00 00 	.LASF6:
+ 1612 001c 00 00 00 00 		.ascii "short int\000"
+ 1613 001e 00 00 00 00 	.LASF12:
+ 1614 0020 00 00 00 00 		.ascii "peeked\000"
+ 1615 0022 00 00 00 00 	.LASF13:
+ 1616 0024 00 00 00 00 		.ascii "ret_val\000"
+ 1617 0026 00 00 00 00 	.LASF21:
+ 1618 0028 00 00 00 00 		.ascii "BQCommitLastPeek\000"
+ 1619 002a 00 00 00 00 	.LASF25:
+ 1620 002c 00 00 00 00 		.ascii "g_tail\000"
+ 1621 002e 00 00 00 00 	.LASF1:
+ 1622 0030 00 00 00 00 		.ascii "uint16\000"
+ 1623 0032 00 00 00 00 	.LASF0:
+ 1624                 		.ascii "uint8\000"
+ 1625                 	.LASF8:
+ 1626 0000 73 68 6F 72 		.ascii "bool\000"
+ 1626      74 20 69 6E 
+ 1626      74 00 
+ 1627                 	.LASF31:
+ 1628 0005 70 65 65 6B 		.ascii "BQForceQueueBytes\000"
+ 1628      65 64 00 
+ 1629                 	.LASF7:
+ 1630 0008 72 65 74 5F 		.ascii "long int\000"
+ 1630      76 61 6C 00 
+ 1631                 	.LASF20:
+ 1632 000c 42 51 43 6F 		.ascii "BQClearBuffer\000"
+ 1632      6D 6D 69 74 
+ 1632      4C 61 73 74 
+ 1632      50 65 65 6B 
+ 1632      00 
+ 1633                 	.LASF16:
+ 1634 0015 67 5F 74 61 		.ascii "BQGetAvailableSize\000"
+ 1634      69 6C 00 
+ 1635                 	.LASF29:
+ 1636 0018 75 69 6E 74 		.ascii "copyIntoBuffer\000"
+ 1636      31 36 00 
+ 1637                 	.LASF19:
+ 1638 001c 75 69 6E 74 		.ascii "BQPeekBytes\000"
+ 1638      38 00 
+ 1639                 	.LASF11:
+ 1640 001f 62 6F 6F 6C 		.ascii "available\000"
+ 1640      00 
+ 1641                 	.LASF23:
+ 1642 0021 42 51 46 6F 		.ascii "g_head\000"
+ 1642      72 63 65 51 
+ 1642      75 65 75 65 
+ 1642      42 79 74 65 
+ 1642      73 00 
+ 1643                 	.LASF2:
+ 1644 002a 6C 6F 6E 67 		.ascii "unsigned char\000"
+ 1644      20 69 6E 74 
+ 1644      00 
+ 1645                 	.LASF5:
+ 1646 002f 42 51 43 6C 		.ascii "signed char\000"
+ 1646      65 61 72 42 
+ 1646      75 66 66 65 
+ 1646      72 00 
+ 1647                 	.LASF27:
+ 1648 0036 42 51 47 65 		.ascii "byte_queue.c\000"
+ 1648      74 41 76 61 
+ 1648      69 6C 61 62 
+ 1648      6C 65 53 69 
+ 1648      7A 65 00 
+ 1649                 	.LASF14:
+ 1650 003f 63 6F 70 79 		.ascii "BQGetBufferCapacity\000"
+ 1650      49 6E 74 6F 
+ 1650      42 75 66 66 
+ 1650      65 72 00 
+ 1651                 	.LASF28:
+ 1652 0047 42 51 50 65 		.ascii "C:\\CSR_uEnergy_SDK-2.4.5.13\\apps\\magic_node\000"
+ 1652      65 6B 42 79 
+ 1652      74 65 73 00 
+ 1653                 	.LASF18:
+ 1654 004d 61 76 61 69 		.ascii "BQPopBytes\000"
+ 1654      6C 61 62 6C 
+ 1654      65 00 
+ 1655                 	.LASF3:
+ 1656 0052 67 5F 68 65 		.ascii "short unsigned int\000"
+ 1656      61 64 00 
+ 1657                 	.LASF26:
+ 1658 0055 75 6E 73 69 		.ascii "GNU C 4.3.4 CSR version 24 for xap [1865517]\000"
+ 1658      67 6E 65 64 
+ 1658      20 63 68 61 
+ 1658      72 00 
+ 1659                 	.LASF22:
+ 1660 005c 73 69 67 6E 		.ascii "g_queue\000"
+ 1660      65 64 20 63 
+ 1660      68 61 72 00 
+ 1661                 	.LASF24:
+ 1662 0062 62 79 74 65 		.ascii "g_peek\000"
+ 1662      5F 71 75 65 
+ 1662      75 65 2E 63 
+ 1662      00 
+ 1663                 	.LASF30:
+ 1664 0069 42 51 47 65 		.ascii "peekBuffer\000"
+ 1664      74 42 75 66 
+ 1664      66 65 72 43 
+ 1664      61 70 61 63 
+ 1664      69 74 79 00 
+ 1665                 	.LASF4:
+ 1666 0073 43 3A 5C 43 		.ascii "long unsigned int\000"
+ 1666      53 52 5F 75 
+ 1666      45 6E 65 72 
+ 1666      67 79 5F 53 
+ 1666      44 4B 2D 32 
+ 1667                 	.LASF10:
+ 1668 0089 42 51 50 6F 		.ascii "p_data\000"
+ 1668      70 42 79 74 
+ 1668      65 73 00 
+ 1669                 	.LASF9:
+ 1670 008e 73 68 6F 72 		.ascii "unsigned int\000"
+ 1670      74 20 75 6E 
+ 1670      73 69 67 6E 
+ 1670      65 64 20 69 
+ 1670      6E 74 00 
+ 1671                 	.LASF17:
+ 1672 0098 47 4E 55 20 		.ascii "BQSafeQueueBytes\000"
+ 1672      43 20 34 2E 
+ 1672      33 2E 34 20 
+ 1672      43 53 52 20 
+ 1672      76 65 72 73 
+ 1673                 	.LASF15:
+ 1674 00ae 67 5F 71 75 		.ascii "BQGetDataSize\000"
+ 1674      65 75 65 00 
+ 1675                 		.ident	"GCC: (GNU) 4.3.4 CSR version 24 for xap [1865517]"
+ 1676 00b2 67 5F 70 65 	...
+ 1676      65 6B 00 

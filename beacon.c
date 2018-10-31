@@ -464,7 +464,7 @@ bool find_sync_head(uint8 *data, uint8 len)
 static unsigned char buf_frame[64];
 void parse_uart_data(timer_id tid);
 int control_mode;
- short int oula_angle[3];//
+ short int oula_angle[3],jia_su_du[3];//
 unsigned short int siyuan_data[4];
 int cnt;
 int updonw_judge(void);
@@ -485,80 +485,56 @@ int updonw_judge(void)
     }
 }
 int start_boardcast = 0;
+int status_flag = 0;
+
 int status_judge(void);
 int status_judge(void)
 {
-    static int state = 0;
-    static int tcnt=0;
-    int flag;
-
-    flag = 0;
-
-    if(state == 0)
+ //   static int state = 0;
+//    static int tcnt=0,timeout_cnt=0;
+    #define ABS(X) ((X) >= 0 ? (X) : (-X))
+    #define THRESH 2000
+    
+    if(status_flag)
     {
-        if(oula_angle[ROLL] > 10 )
-        {
-            state = 1;
-            tcnt = 0;
-        }
-
-        if(oula_angle[ROLL] < -10)
-        {
-            
-        }
-
+        return status_flag;
     }
-    else if(state == 1)
+    
+    if(ABS(jia_su_du[0]) > THRESH || ABS(jia_su_du[1]) > THRESH || ABS(jia_su_du[2]) > THRESH)
     {
-        
-        if(oula_angle[ROLL] < -10)
-        {
-            state = 2;
-            tcnt = 0;
-        }
-        else
-        {
-            if(++tcnt>300)
-            {
-                state = 0;
-            }
-        }
+        status_flag = 1;
     }
-    else if(state == 2)
+    /*
+    timeout_cnt++;
+    
+    if(oula_angle[ROLL] > 10 && (state == 0 || state == 2)  )
     {
-        if(oula_angle[ROLL] > 10)
-        {
-            state = 3;
-            tcnt = 0;
-        }
-        else
-        {
-            if(++tcnt>300)
-            {
-                state = 0;
-            }
-        }
+        state = 1;
+        tcnt++;
+        timeout_cnt = 0;
     }
-    else if(state == 3)
+    
+    if(oula_angle[ROLL] < -10 && (state == 0 || state == 1))
     {
-        
-        if(oula_angle[ROLL] < -10)
-        {
-            state = 0;
-            tcnt = 0;
-            flag = 1;
-        }
-        else
-        {
-            if(++tcnt>300)
-            {
-                state = 0;
-            }
-        }
+        state = 2;
+        tcnt++;
+        timeout_cnt = 0;
     }
 
+    if(tcnt >= 4)
+    {
+        status_flag = 1;
+        timeout_cnt = 1024;
+    }
 
-    return flag;
+    if(timeout_cnt > 500 || state == 0)
+    {
+        timeout_cnt = 0;
+        state = 0;
+        tcnt = 0;
+    }*/
+
+    return status_flag;
 
 }
 void parse_uart_data(timer_id tid)
@@ -618,6 +594,10 @@ void parse_uart_data(timer_id tid)
     		offset = 0;
     		if((cmd_type&0x01) == 1)//jia su du
     		{
+                jia_su_du[0] = buf_frame[DATA_POS+offset] << 8 | buf_frame[DATA_POS+offset+1];
+                jia_su_du[1] = buf_frame[DATA_POS+offset+2] << 8 | buf_frame[DATA_POS+offset+3];
+                jia_su_du[2] = buf_frame[DATA_POS+offset+4] << 8 | buf_frame[DATA_POS+offset+5];
+
     			offset += 6;
     		}
 
@@ -805,6 +785,8 @@ static void fast_blink_led(timer_id tid)
                     led_state = 0;
 
                     adc_read();
+
+                    status_flag = 0;
                }
 
                     if(up_down_state > 0)//control mode, give up exit, up down is running

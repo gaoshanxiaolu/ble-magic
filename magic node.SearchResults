@@ -1,0 +1,25 @@
+---- UART_PARSE_TID_DEF Matches (6 in 2 files) ----
+Csr_mesh_light.c (applications\csrmeshchairnd):122
+#ifdef UART_PARSE_TID_DEF
+
+#define MAX_APP_TIMERS                 (10+2 + MAX_CSR_MESH_TIMERS + 1)
+Csr_mesh_light.c (applications\csrmeshchairnd):278
+#ifdef UART_PARSE_TID_DEF
+
+timer_id uart_parse_tid = TIMER_INVALID;
+Csr_mesh_light.c (applications\csrmeshchairnd):345
+#ifdef UART_PARSE_TID_DEF
+static void handleUartTimerExpiry(timer_id tid)
+{
+Csr_mesh_light.c (applications\csrmeshchairnd):1499
+#ifndef UART_PARSE_TID_DEF
+		parse_uart_data();
+#endif
+Csr_mesh_light.c (applications\csrmeshchairnd):2602
+	#ifdef UART_PARSE_TID_DEF
+	uart_parse_tid= TimerCreate(
+						   UART_PARSE_TIME,
+Gatt_client.c (applications\csrmeshchairnd):434
+#ifndef UART_PARSE_TID_DEF
+	parse_uart_data();
+#endif
